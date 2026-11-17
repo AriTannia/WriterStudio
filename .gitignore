@@ -1,0 +1,14 @@
+# Build output
+/out/
+*.class
+WriterStudio.jar
+
+# IDE and OS files
+.idea/
+*.iml
+.vscode/
+Thumbs.db
+.DS_Store
+
+# Temporary project files
+project.xml.tmp
