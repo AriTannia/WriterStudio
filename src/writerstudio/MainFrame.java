@@ -361,7 +361,7 @@ public class MainFrame extends JFrame {
             case EDITOR:
                 return selection.size() == 1 && !selection.get(0).isFolder();
             case SCRIVENINGS:
-                return !isResearchDocumentSelection();
+                return !isResearchDocumentSelection() || isThreeActStructureSelection();
             case CORKBOARD:
                 Item it = selection.size() == 1 ? selection.get(0) : null;
                 return it != null && it.zone() != Item.Special.TRASH
@@ -379,6 +379,11 @@ public class MainFrame extends JFrame {
                 && selection.get(0).zone() == Item.Special.RESEARCH;
     }
 
+    private boolean isThreeActStructureSelection() {
+        return isResearchDocumentSelection()
+                && selection.get(0).getResearchType() == Item.ResearchType.THREE_ACT_STRUCTURE;
+    }
+
     private void showEditor(boolean scrivenings) {
         if (selection.isEmpty()) {
             editor.showEmpty("Select a document in the Binder.");
@@ -394,6 +399,10 @@ public class MainFrame extends JFrame {
         if (selection.size() == 1 && selection.get(0).getKind() == Item.Kind.FILE) {
             Item it = selection.get(0);
             editor.showFile(it, project.resolve(it));
+            return;
+        }
+        if (selection.size() == 1 && isThreeActStructureSelection()) {
+            editor.showThreeActStructure(selection.get(0));
             return;
         }
         Set<Item> docs = new LinkedHashSet<>();

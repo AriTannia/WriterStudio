@@ -49,7 +49,12 @@ public final class ResearchEditorPanel extends JPanel {
     private final JComboBox<Item.ResearchType> type =
             new JComboBox<>(Item.ResearchType.documentTypes());
     private final JTextArea content = new JTextArea(8, 60);
+    private final CollapsibleSection contentSection = new CollapsibleSection("Content");
     private final CollapsibleSection characterSection = new CollapsibleSection("Character Profile");
+    private final CollapsibleSection threeActSection = new CollapsibleSection("Three-Act Structure", false);
+    private final CollapsibleSection imagesSection = new CollapsibleSection("Images");
+    private final CollapsibleSection linksSection = new CollapsibleSection("Linked Cards");
+    private final CollapsibleSection fieldsSection = new CollapsibleSection("Optional Fields");
     private final JComboBox<Item.CharacterClass> characterClass =
             new JComboBox<>(Item.CharacterClass.values());
     private final JTextField roles = new JTextField();
@@ -74,8 +79,12 @@ public final class ResearchEditorPanel extends JPanel {
         addField("Research Type", type);
         content.setLineWrap(true);
         content.setWrapStyleWord(true);
-        addField("Content", new JScrollPane(content));
+        JScrollPane contentScroll = new JScrollPane(content);
+        contentScroll.setPreferredSize(new Dimension(700, 180));
+        contentSection.addContent(contentScroll);
+        form.add(contentSection);
 
+        addThreeActSection();
         addResearchSection();
         addCharacterSection();
 
@@ -84,6 +93,11 @@ public final class ResearchEditorPanel extends JPanel {
         add(scroll, BorderLayout.CENTER);
 
         title.addActionListener(e -> saveBasics());
+        title.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { saveBasics(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { saveBasics(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { saveBasics(); }
+        });
         type.addActionListener(e -> saveBasics());
         content.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void insertUpdate(javax.swing.event.DocumentEvent e) { saveContent(); }
@@ -94,7 +108,10 @@ public final class ResearchEditorPanel extends JPanel {
     }
 
     private void addField(String label, Component component) {
-        JLabel heading = new JLabel(label);
+        addField(new JLabel(label), component);
+    }
+
+    private void addField(JLabel heading, Component component) {
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
         form.add(heading);
         if (component instanceof JComponent) {
@@ -106,16 +123,14 @@ public final class ResearchEditorPanel extends JPanel {
     }
 
     private void addResearchSection() {
-        CollapsibleSection section = section("Images");
         imageGallery.setBackground(new java.awt.Color(0xF5F0E7));
         JScrollPane imageScroll = new JScrollPane(imageGallery);
         imageScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         imageScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         imageScroll.setPreferredSize(new Dimension(700, 205));
-        section.addContent(imageScroll);
-        section.addContent(primaryImageButton);
-        section.addContent(button("+ Add image", this::addImage));
-        CollapsibleSection linksSection = section("Linked Cards");
+        imagesSection.addContent(imageScroll);
+        imagesSection.addContent(primaryImageButton);
+        imagesSection.addContent(button("+ Add image", this::addImage));
         linksTree.setRootVisible(false);
         linksTree.setShowsRootHandles(true);
         linksTree.setPreferredSize(new Dimension(700, 160));
@@ -127,11 +142,10 @@ public final class ResearchEditorPanel extends JPanel {
         });
         linksSection.addContent(new JScrollPane(linksTree));
         linksSection.addContent(button("+ Link cards", this::linkCards));
-        CollapsibleSection fieldsSection = section("Optional Fields");
         fieldRows.setLayout(new BoxLayout(fieldRows, BoxLayout.Y_AXIS));
         fieldsSection.addContent(fieldRows);
         fieldsSection.addContent(button("+ Add field", this::addField));
-        form.add(section);
+        form.add(imagesSection);
         form.add(linksSection);
         form.add(fieldsSection);
     }
@@ -152,6 +166,11 @@ public final class ResearchEditorPanel extends JPanel {
         relationshipRows.setLayout(new BoxLayout(relationshipRows, BoxLayout.Y_AXIS));
         characterSection.addContent(relationshipRows);
         form.add(characterSection);
+    }
+
+    private void addThreeActSection() {
+        threeActSection.setVisible(false);
+        form.add(threeActSection);
     }
 
     private CollapsibleSection section(String title) {
@@ -179,7 +198,10 @@ public final class ResearchEditorPanel extends JPanel {
             title.setText(item.getTitle());
             type.setSelectedItem(item.getResearchType());
             content.setText(item.getContent());
+            setContentLabel(item.getResearchType());
             characterSection.setVisible(item.getResearchType() == Item.ResearchType.CHARACTER);
+            threeActSection.setVisible(item.getResearchType() == Item.ResearchType.THREE_ACT_STRUCTURE);
+            setResearchSectionsVisible(item.getResearchType() != Item.ResearchType.THREE_ACT_STRUCTURE);
             primaryImageButton.setVisible(item.getResearchType() == Item.ResearchType.CHARACTER);
             refreshLists();
         } finally {
@@ -194,10 +216,24 @@ public final class ResearchEditorPanel extends JPanel {
         String value = title.getText().trim();
         if (!value.isEmpty() && !value.equals(item.getTitle())) item.setTitle(value);
         item.setResearchType((Item.ResearchType) type.getSelectedItem());
+        setContentLabel(item.getResearchType());
         characterSection.setVisible(item.getResearchType() == Item.ResearchType.CHARACTER);
+        threeActSection.setVisible(item.getResearchType() == Item.ResearchType.THREE_ACT_STRUCTURE);
+        setResearchSectionsVisible(item.getResearchType() != Item.ResearchType.THREE_ACT_STRUCTURE);
         primaryImageButton.setVisible(item.getResearchType() == Item.ResearchType.CHARACTER);
+        if (item.getResearchType() == Item.ResearchType.THREE_ACT_STRUCTURE) refreshThreeActFields();
         project.changedQuietly(item);
         form.revalidate();
+    }
+
+    private void setContentLabel(Item.ResearchType researchType) {
+        contentSection.setTitle(researchType == Item.ResearchType.THREE_ACT_STRUCTURE ? "Summary" : "Content");
+    }
+
+    private void setResearchSectionsVisible(boolean visible) {
+        imagesSection.setVisible(visible);
+        linksSection.setVisible(visible);
+        fieldsSection.setVisible(visible);
     }
 
     private void saveContent() {
@@ -224,6 +260,7 @@ public final class ResearchEditorPanel extends JPanel {
         refreshLinkedGroups();
         refreshRelationships();
         refreshFields();
+        refreshThreeActFields();
         characterClass.setSelectedItem(item.getCharacterClass());
         imageGallery.revalidate();
         imageGallery.repaint();
@@ -515,6 +552,97 @@ public final class ResearchEditorPanel extends JPanel {
         fieldRows.repaint();
     }
 
+    private static final ThreeActField[] THREE_ACT_FIELDS = {
+            new ThreeActField("1. Opening Image", "0-1%",
+                    "Image showing the initial state of the character and world."),
+            new ThreeActField("2. Theme Stated", "5%",
+                    "The main theme is introduced through a character or situation."),
+            new ThreeActField("3. Set-Up", "1-10%",
+                    "Introduce the characters, world, relationships, circumstances, and problems that must change."),
+            new ThreeActField("4. Catalyst", "10%",
+                    "An unexpected event breaks the ordinary world and starts the story."),
+            new ThreeActField("5. Debate", "10-20%",
+                    "The character hesitates, weighs the event, and questions the choice ahead."),
+            new ThreeActField("6. Break into Two", "20-25%",
+                    "The character chooses and enters the world of Act II."),
+            new ThreeActField("7. B Story", "22-30%",
+                    "A subplot, often about relationships or theme, helps the character change."),
+            new ThreeActField("8. Fun and Games", "30-55%",
+                    "Deliver the promise of the premise while exploring the story's world and situations."),
+            new ThreeActField("9. Midpoint", "50%",
+                    "The middle turning point: often a false victory or false defeat that raises the stakes."),
+            new ThreeActField("10. Bad Guys Close In", "50-75%",
+                    "External pressure and internal conflict intensify; everything starts working against the character."),
+            new ThreeActField("11. All Is Lost", "75%",
+                    "The character reaches the lowest point after a major loss or failure."),
+            new ThreeActField("12. Dark Night of the Soul", "75-80%",
+                    "The character faces failure, reflects, and realizes what they have not understood."),
+            new ThreeActField("13. Break into Three", "80%",
+                    "The character finds a new solution by combining lessons from the A Story and B Story."),
+            new ThreeActField("14. Finale", "80-99%",
+                    "The character applies the new understanding, faces the final challenge, and resolves the main conflict."),
+            new ThreeActField("15. Final Image", "100%",
+                    "An ending image reflecting the Opening Image and showing how the character and world changed.")
+    };
+
+    private void refreshThreeActFields() {
+        threeActSection.removeAllContent();
+        if (item == null || item.getResearchType() != Item.ResearchType.THREE_ACT_STRUCTURE) return;
+        Map<String, String> values = item.getFields();
+        boolean changed = false;
+        for (ThreeActField beat : THREE_ACT_FIELDS) {
+            if (!values.containsKey(beat.name)) {
+                values.put(beat.name, "");
+                changed = true;
+            }
+        }
+        if (changed) {
+            item.setFields(values);
+            project.markDirty();
+        }
+
+        addThreeActGroup("ACT I - SETUP", "0-25%", THREE_ACT_FIELDS, 0, 5);
+        addThreeActGroup("ACT II - CONFRONTATION", "25-75%", THREE_ACT_FIELDS, 6, 12);
+        addThreeActGroup("ACT III - RESOLUTION", "80-100%", THREE_ACT_FIELDS, 13, 14);
+        threeActSection.revalidate();
+        threeActSection.repaint();
+    }
+
+    private void addThreeActGroup(String title, String range, ThreeActField[] fields, int start, int end) {
+        CollapsibleSection actSection = new CollapsibleSection(title + "  " + range);
+        for (int i = start; i <= end; i++) addThreeActField(actSection, fields[i]);
+        threeActSection.addContent(actSection);
+    }
+
+    private void addThreeActField(CollapsibleSection parent, ThreeActField beat) {
+        JTextArea value = new JTextArea(item.getFields().get(beat.name), 4, 60);
+        value.setLineWrap(true);
+        value.setWrapStyleWord(true);
+        value.setAlignmentX(Component.LEFT_ALIGNMENT);
+        value.setPreferredSize(new Dimension(700, 90));
+        value.setMaximumSize(new Dimension(Integer.MAX_VALUE, 110));
+        JLabel hint = new JLabel("<html><i>" + escapeHtml(beat.description) + "</i></html>");
+        hint.setAlignmentX(Component.LEFT_ALIGNMENT);
+        value.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { saveThreeActField(beat.name, value); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { saveThreeActField(beat.name, value); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { saveThreeActField(beat.name, value); }
+        });
+        CollapsibleSection fieldSection = new CollapsibleSection(
+                beat.name + (beat.range.isEmpty() ? "" : "  " + beat.range));
+        fieldSection.addContent(hint);
+        fieldSection.addContent(value);
+        parent.addContent(fieldSection);
+    }
+
+    private void saveThreeActField(String name, JTextArea value) {
+        if (updating || item == null || item.getResearchType() != Item.ResearchType.THREE_ACT_STRUCTURE) return;
+        Map<String, String> fields = item.getFields();
+        fields.put(name, value.getText());
+        item.setFields(fields);
+        project.markDirty();
+    }
+
     private void addFieldRow(String name, String value) {
         JPanel row = new JPanel(new BorderLayout(8, 4));
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -543,6 +671,18 @@ public final class ResearchEditorPanel extends JPanel {
         fieldRows.add(row);
     }
 
+    private static final class ThreeActField {
+        private final String name;
+        private final String range;
+        private final String description;
+
+        ThreeActField(String name, String range, String description) {
+            this.name = name;
+            this.range = range;
+            this.description = description;
+        }
+    }
+
     private void saveField(String originalName, JTextField fieldName, JTextArea fieldValue) {
         if (updating || item == null) return;
         Map<String, String> fields = item.getFields();
@@ -556,10 +696,16 @@ public final class ResearchEditorPanel extends JPanel {
     private static final class CollapsibleSection extends JPanel {
         private final JPanel body = new JPanel();
         private final JButton toggle;
+        private String title;
         private boolean expanded = true;
 
         CollapsibleSection(String title) {
+            this(title, true);
+        }
+
+        CollapsibleSection(String title, boolean collapsible) {
             super(new BorderLayout());
+            this.title = title;
             setAlignmentX(Component.LEFT_ALIGNMENT);
             toggle = new JButton("\u25bc  " + title);
             toggle.setHorizontalAlignment(JButton.LEFT);
@@ -568,21 +714,32 @@ public final class ResearchEditorPanel extends JPanel {
             toggle.addActionListener(e -> {
                 expanded = !expanded;
                 body.setVisible(expanded);
-                toggle.setText((expanded ? "\u25bc  " : "\u25b6  ") + title);
+                toggle.setText((expanded ? "\u25bc  " : "\u25b6  ") + this.title);
                 revalidate();
             });
             body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
-            body.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(new java.awt.Color(0xD6C9B0)),
-                    BorderFactory.createEmptyBorder(8, 8, 8, 8)));
-            add(toggle, BorderLayout.NORTH);
+            body.setBorder(collapsible
+                    ? BorderFactory.createCompoundBorder(
+                            BorderFactory.createLineBorder(new java.awt.Color(0xD6C9B0)),
+                            BorderFactory.createEmptyBorder(8, 8, 8, 8))
+                    : BorderFactory.createEmptyBorder(8, 0, 8, 0));
+            if (collapsible) add(toggle, BorderLayout.NORTH);
             add(body, BorderLayout.CENTER);
+        }
+
+        void setTitle(String value) {
+            title = value;
+            toggle.setText((expanded ? "\u25bc  " : "\u25b6  ") + title);
         }
 
         void addContent(Component component) {
             if (component instanceof JComponent) ((JComponent) component).setAlignmentX(Component.LEFT_ALIGNMENT);
             body.add(component);
             body.add(Box.createVerticalStrut(6));
+        }
+
+        void removeAllContent() {
+            body.removeAll();
         }
     }
 

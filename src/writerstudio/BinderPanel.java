@@ -247,6 +247,7 @@ public class BinderPanel extends JPanel {
             case ORGANIZATION: return "New Organization";
             case EVENT: return "New Event";
             case REFERENCE: return "New Reference";
+            case THREE_ACT_STRUCTURE: return "Three-Act Structure";
             default: return "New Research Note";
         }
     }
@@ -263,6 +264,8 @@ public class BinderPanel extends JPanel {
                 return "When / where\n\nWhat happens\n\nConsequences\n\nNotes\n";
             case REFERENCE:
                 return "Source\n\nKey information\n\nLinks / citations\n\nNotes\n";
+            case THREE_ACT_STRUCTURE:
+                return "";
             default:
                 return "";
         }

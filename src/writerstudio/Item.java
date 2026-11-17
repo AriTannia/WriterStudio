@@ -15,7 +15,8 @@ public class Item extends DefaultMutableTreeNode {
     public enum Kind { FOLDER, TEXT, FILE }
     public enum ResearchType {
         NOTE("Note"), CHARACTER("Character"), LOCATION("Location"), ORGANIZATION("Organization"),
-        EVENT("Event"), REFERENCE("Reference"), RELATIONSHIP("Relationship");
+        EVENT("Event"), REFERENCE("Reference"), THREE_ACT_STRUCTURE("Three-Act Structure"),
+        RELATIONSHIP("Relationship");
 
         private final String label;
 
@@ -23,7 +24,9 @@ public class Item extends DefaultMutableTreeNode {
         @Override public String toString() { return label; }
 
         public static ResearchType[] documentTypes() {
-            return new ResearchType[] { NOTE, CHARACTER, LOCATION, ORGANIZATION, EVENT, REFERENCE };
+            return new ResearchType[] {
+                    NOTE, CHARACTER, LOCATION, ORGANIZATION, EVENT, REFERENCE, THREE_ACT_STRUCTURE
+            };
         }
     }
     public enum CharacterClass {

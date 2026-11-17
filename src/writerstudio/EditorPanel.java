@@ -85,6 +85,9 @@ public class EditorPanel extends JPanel {
     private final SimpleAttributeSet paraBody = new SimpleAttributeSet();
     private final SimpleAttributeSet paraBlank = new SimpleAttributeSet();
     private final SimpleAttributeSet paraSeparator = new SimpleAttributeSet();
+    private final SimpleAttributeSet structureTitle = new SimpleAttributeSet();
+    private final SimpleAttributeSet structureHeading = new SimpleAttributeSet();
+    private final SimpleAttributeSet structureLabel = new SimpleAttributeSet();
 
     private List<Item> sections = new ArrayList<>();
     private UndoManager undo = new UndoManager();
@@ -116,6 +119,23 @@ public class EditorPanel extends JPanel {
         StyleConstants.setSpaceAbove(paraSeparator, 16f);
         StyleConstants.setSpaceBelow(paraSeparator, 6f);
         paraSeparator.addAttribute(HDR, Boolean.TRUE);
+
+        StyleConstants.setFontFamily(structureTitle, "SansSerif");
+        StyleConstants.setFontSize(structureTitle, 28);
+        StyleConstants.setBold(structureTitle, true);
+        StyleConstants.setSpaceAbove(structureTitle, 8f);
+        StyleConstants.setSpaceBelow(structureTitle, 18f);
+
+        StyleConstants.setFontFamily(structureHeading, "SansSerif");
+        StyleConstants.setFontSize(structureHeading, 18);
+        StyleConstants.setBold(structureHeading, true);
+        StyleConstants.setForeground(structureHeading, new Color(0x596579));
+        StyleConstants.setSpaceAbove(structureHeading, 18f);
+        StyleConstants.setSpaceBelow(structureHeading, 8f);
+
+        StyleConstants.setFontFamily(structureLabel, "SansSerif");
+        StyleConstants.setFontSize(structureLabel, 17);
+        StyleConstants.setBold(structureLabel, true);
 
         setBackground(new Color(0xEEF1F5));
         pane.setMargin(new Insets(24, 48, 24, 48));
@@ -168,6 +188,51 @@ public class EditorPanel extends JPanel {
         cards.show(stack, "file");
     }
 
+    /** Shows a Three-Act Structure card in Scrivenings mode without flattening its beats. */
+    public void showThreeActStructure(Item item) {
+        flush();
+        sections = new ArrayList<>();
+        setFormatBarEnabled(false);
+        pane.setEditable(false);
+        DefaultStyledDocument doc = new DefaultStyledDocument();
+        try {
+            appendStructureLine(doc, item.getTitle(), structureTitle);
+            appendStructureLine(doc, "Summary", structureHeading);
+            appendStructureLine(doc, item.getContent().isEmpty() ? "[empty]" : item.getContent(), body);
+            appendStructureLine(doc, "", body);
+            appendStructureGroup(doc, "ACT I - SETUP  0-25%",
+                    new String[] {"1. Opening Image", "2. Theme Stated", "3. Set-Up",
+                            "4. Catalyst", "5. Debate", "6. Break into Two"}, item);
+            appendStructureGroup(doc, "ACT II - CONFRONTATION  25-75%",
+                    new String[] {"7. B Story", "8. Fun and Games", "9. Midpoint",
+                            "10. Bad Guys Close In", "11. All Is Lost",
+                            "12. Dark Night of the Soul", "13. Break into Three"}, item);
+            appendStructureGroup(doc, "ACT III - RESOLUTION  80-100%",
+                    new String[] {"14. Finale", "15. Final Image"}, item);
+        } catch (BadLocationException e) {
+            throw new IllegalStateException(e);
+        }
+        pane.setDocument(doc);
+        pane.setCaretPosition(0);
+        cards.show(stack, "text");
+    }
+
+    private void appendStructureGroup(DefaultStyledDocument doc, String title,
+                                      String[] fields, Item item) throws BadLocationException {
+        appendStructureLine(doc, title, structureHeading);
+        for (String field : fields) {
+            String value = item.getFields().get(field);
+            appendStructureLine(doc, field + ":", structureLabel);
+            appendStructureLine(doc, value == null || value.isEmpty() ? "[empty]" : value, body);
+        }
+        appendStructureLine(doc, "", body);
+    }
+
+    private void appendStructureLine(DefaultStyledDocument doc, String text,
+                                     SimpleAttributeSet style) throws BadLocationException {
+        doc.insertString(doc.getLength(), text + "\n", style);
+    }
+
     /**
      * Shows the given documents. One document is edited directly; several are flowed
      * together with a separator line before each (Scrivenings).
@@ -179,6 +244,7 @@ public class EditorPanel extends JPanel {
             return;
         }
         setFormatBarEnabled(true);
+        pane.setEditable(true);
         sections = new ArrayList<>(items);
         boolean headers = items.size() > 1;
 

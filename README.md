@@ -14,10 +14,15 @@ A Scrivener-inspired long-form writing and research application built with Java 
   instead of the free-form document editor. Cards support Title, Content,
   Images with captions, Linked Cards, Character Class, custom roles,
   Relationships, and Optional Fields.
+- **Three-Act Structure cards** - A fixed story-planning layout with Summary
+  and the 15 beats of Act I, Act II, and Act III, including percentage ranges
+  and guidance for each beat.
 - **Novel spacing** - Paragraphs use novel-style spacing: first-line indentation,
   compact lines within paragraphs, and visible spacing between paragraphs.
 - **Scrivenings** - Select a folder or multiple documents to edit them as one
   continuous view. Changes are saved back to the original documents.
+  Three-Act Structure cards can also be viewed in a structured Scrivenings
+  preview showing their title, summary, acts, and beats.
 - **Corkboard** - Editable index cards with title and synopsis. Select a card
   and use the fixed ordering controls to move it to the top, up, down, or
   bottom. This avoids unreliable drag-and-drop reflow. Corkboard cards support
@@ -25,9 +30,9 @@ A Scrivener-inspired long-form writing and research application built with Java 
 - **Outliner** - A directly editable table containing Title, Synopsis, Label,
   Status, Words, and Compile information, including child documents.
 - **Research** - General-purpose research templates: Note, Character, Location,
-  Organization, Event, and Reference. Character cards support portraits,
-  Main/Side/Supporting Character classes, multiple custom roles, relationships,
-  and optional fields.
+  Organization, Event, Reference, and Three-Act Structure. Character cards
+  support portraits, Main/Side/Supporting Character classes, multiple custom
+  roles, relationships, and optional fields.
 - **Research sections** - Collapsible sections, a horizontal image gallery,
   captions below images, linked-card trees, relationship management, and
   inline optional fields. Double-click an image to open a resizable viewer.
