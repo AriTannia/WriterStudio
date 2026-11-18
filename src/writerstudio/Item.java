@@ -1,6 +1,7 @@
 package writerstudio;
 
 import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.MutableTreeNode;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,6 +59,10 @@ public class Item extends DefaultMutableTreeNode {
     private final Map<String, String> fields = new LinkedHashMap<>();
     private String file = "";           // relative path inside the project (FILE items only)
     private boolean contentDirty = true;
+    private boolean wordsDirty = true;
+    private boolean totalWordsDirty = true;
+    private int wordsCache;
+    private int totalWordsCache;
 
     public Item(Kind kind, String title) {
         this(UUID.randomUUID().toString(), kind, title);
@@ -191,6 +196,7 @@ public class Item extends DefaultMutableTreeNode {
         if (!c.equals(content)) {
             content = c;
             contentDirty = true;
+            invalidateWordCounts();
         }
     }
 
@@ -198,17 +204,60 @@ public class Item extends DefaultMutableTreeNode {
     void setContentLoaded(String c) {
         content = c == null ? "" : c;
         contentDirty = false;
+        invalidateWordCounts();
     }
 
     public boolean isContentDirty() { return contentDirty; }
     void clearDirty() { contentDirty = false; }
 
-    public int words() { return Util.words(content); }
+    public int words() {
+        if (wordsDirty) {
+            wordsCache = Util.words(content);
+            wordsDirty = false;
+        }
+        return wordsCache;
+    }
 
     public int totalWords() {
-        int n = words();
-        for (int i = 0; i < getChildCount(); i++) n += itemAt(i).totalWords();
-        return n;
+        if (totalWordsDirty) {
+            int n = words();
+            for (int i = 0; i < getChildCount(); i++) n += itemAt(i).totalWords();
+            totalWordsCache = n;
+            totalWordsDirty = false;
+        }
+        return totalWordsCache;
+    }
+
+    private void invalidateWordCounts() {
+        wordsDirty = true;
+        Item node = this;
+        while (node != null) {
+            node.totalWordsDirty = true;
+            node = node.getParent() instanceof Item ? (Item) node.getParent() : null;
+        }
+    }
+
+    private void invalidateTotalWords() {
+        Item node = this;
+        while (node != null) {
+            node.totalWordsDirty = true;
+            node = node.getParent() instanceof Item ? (Item) node.getParent() : null;
+        }
+    }
+
+    @Override public void insert(MutableTreeNode child, int index) {
+        super.insert(child, index);
+        invalidateTotalWords();
+    }
+
+    @Override public void remove(int childIndex) {
+        super.remove(childIndex);
+        invalidateTotalWords();
+    }
+
+    @Override public void removeAllChildren() {
+        super.removeAllChildren();
+        invalidateTotalWords();
     }
 
     // ---- tree helpers --------------------------------------------------------

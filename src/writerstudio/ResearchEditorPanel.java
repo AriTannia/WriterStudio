@@ -16,6 +16,7 @@ import javax.swing.JTree;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.Scrollable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
@@ -26,10 +27,13 @@ import javax.swing.tree.TreePath;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -44,7 +48,7 @@ import java.util.function.Consumer;
 /** Structured editor for Research cards; unlike EditorPanel it has no free-form document mode. */
 public final class ResearchEditorPanel extends JPanel {
     private final Project project;
-    private final JPanel form = new JPanel();
+    private final JPanel form = new ResponsiveForm();
     private final JTextField title = new JTextField();
     private final JComboBox<Item.ResearchType> type =
             new JComboBox<>(Item.ResearchType.documentTypes());
@@ -72,7 +76,7 @@ public final class ResearchEditorPanel extends JPanel {
         this.project = project;
         this.openItem = openItem;
         form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
-        form.setBorder(BorderFactory.createEmptyBorder(18, 30, 30, 30));
+        form.setBorder(BorderFactory.createEmptyBorder(18, 22, 30, 22));
 
         title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 22f));
         addField("Title", title);
@@ -81,6 +85,7 @@ public final class ResearchEditorPanel extends JPanel {
         content.setWrapStyleWord(true);
         JScrollPane contentScroll = new JScrollPane(content);
         contentScroll.setPreferredSize(new Dimension(700, 180));
+        allowWidthResize(contentScroll);
         contentSection.addContent(contentScroll);
         form.add(contentSection);
 
@@ -114,12 +119,19 @@ public final class ResearchEditorPanel extends JPanel {
     private void addField(JLabel heading, Component component) {
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
         form.add(heading);
+        if (component instanceof JScrollPane) component.setPreferredSize(new Dimension(700, 180));
         if (component instanceof JComponent) {
             ((JComponent) component).setAlignmentX(Component.LEFT_ALIGNMENT);
+            allowWidthResize((JComponent) component);
         }
-        if (component instanceof JScrollPane) component.setPreferredSize(new Dimension(700, 180));
         form.add(component);
         form.add(Box.createVerticalStrut(10));
+    }
+
+    private void allowWidthResize(JComponent component) {
+        Dimension preferred = component.getPreferredSize();
+        component.setMinimumSize(new Dimension(0, preferred.height));
+        component.setMaximumSize(new Dimension(Integer.MAX_VALUE, preferred.height));
     }
 
     private void addResearchSection() {
@@ -128,19 +140,22 @@ public final class ResearchEditorPanel extends JPanel {
         imageScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         imageScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         imageScroll.setPreferredSize(new Dimension(700, 205));
+        allowWidthResize(imageScroll);
         imagesSection.addContent(imageScroll);
         imagesSection.addContent(primaryImageButton);
         imagesSection.addContent(button("+ Add image", this::addImage));
         linksTree.setRootVisible(false);
         linksTree.setShowsRootHandles(true);
-        linksTree.setPreferredSize(new Dimension(700, 160));
         linksTree.addTreeSelectionListener(event -> {
             Object value = linksTree.getLastSelectedPathComponent();
             if (value instanceof LinkedNode && ((LinkedNode) value).item != null) {
                 openItem.accept(((LinkedNode) value).item);
             }
         });
-        linksSection.addContent(new JScrollPane(linksTree));
+        JScrollPane linksScroll = new JScrollPane(linksTree);
+        linksScroll.setPreferredSize(new Dimension(700, 160));
+        allowWidthResize(linksScroll);
+        linksSection.addContent(linksScroll);
         linksSection.addContent(button("+ Link cards", this::linkCards));
         fieldRows.setLayout(new BoxLayout(fieldRows, BoxLayout.Y_AXIS));
         fieldsSection.addContent(fieldRows);
@@ -171,10 +186,6 @@ public final class ResearchEditorPanel extends JPanel {
     private void addThreeActSection() {
         threeActSection.setVisible(false);
         form.add(threeActSection);
-    }
-
-    private CollapsibleSection section(String title) {
-        return new CollapsibleSection(title);
     }
 
     private JLabel label(String text) {
@@ -620,6 +631,7 @@ public final class ResearchEditorPanel extends JPanel {
         value.setWrapStyleWord(true);
         value.setAlignmentX(Component.LEFT_ALIGNMENT);
         value.setPreferredSize(new Dimension(700, 90));
+        value.setMinimumSize(new Dimension(0, 90));
         value.setMaximumSize(new Dimension(Integer.MAX_VALUE, 110));
         JLabel hint = new JLabel("<html><i>" + escapeHtml(beat.description) + "</i></html>");
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -648,20 +660,24 @@ public final class ResearchEditorPanel extends JPanel {
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
         JTextField fieldName = new JTextField(name);
         JTextArea fieldValue = new JTextArea(value, 4, 40);
+        String[] storedName = {name};
         fieldValue.setLineWrap(true);
         fieldValue.setWrapStyleWord(true);
         JButton remove = iconButton("Delete optional field", Icons.delete(), () -> {
             Map<String, String> fields = item.getFields();
-            fields.remove(name);
+            fields.remove(storedName[0]);
             item.setFields(fields);
             project.markDirty();
             refreshFields();
         });
-        fieldName.addActionListener(event -> saveField(name, fieldName, fieldValue));
+        fieldName.addActionListener(event -> saveField(storedName, fieldName, fieldValue));
+        fieldName.addFocusListener(new FocusAdapter() {
+            @Override public void focusLost(FocusEvent event) { saveField(storedName, fieldName, fieldValue); }
+        });
         fieldValue.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            public void insertUpdate(javax.swing.event.DocumentEvent e) { saveField(name, fieldName, fieldValue); }
-            public void removeUpdate(javax.swing.event.DocumentEvent e) { saveField(name, fieldName, fieldValue); }
-            public void changedUpdate(javax.swing.event.DocumentEvent e) { saveField(name, fieldName, fieldValue); }
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { saveFieldValue(storedName, fieldValue); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { saveFieldValue(storedName, fieldValue); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { saveFieldValue(storedName, fieldValue); }
         });
         JPanel valuePanel = new JPanel(new BorderLayout(4, 2));
         valuePanel.add(fieldName, BorderLayout.NORTH);
@@ -683,12 +699,43 @@ public final class ResearchEditorPanel extends JPanel {
         }
     }
 
-    private void saveField(String originalName, JTextField fieldName, JTextArea fieldValue) {
+    private static final class ResponsiveForm extends JPanel implements Scrollable {
+        @Override public Dimension getPreferredScrollableViewportSize() { return getPreferredSize(); }
+        @Override public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return 20;
+        }
+        @Override public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return Math.max(20, visibleRect.height - 20);
+        }
+        @Override public boolean getScrollableTracksViewportWidth() { return true; }
+        @Override public boolean getScrollableTracksViewportHeight() { return false; }
+    }
+
+    private void saveField(String[] storedName, JTextField fieldName, JTextArea fieldValue) {
         if (updating || item == null) return;
         Map<String, String> fields = item.getFields();
-        fields.remove(originalName);
         String name = fieldName.getText().trim();
-        if (!name.isEmpty()) fields.put(name, fieldValue.getText());
+        if (name.isEmpty()) {
+            fieldName.setText(storedName[0]);
+            return;
+        }
+        if (!name.equals(storedName[0]) && fields.containsKey(name)) {
+            JOptionPane.showMessageDialog(this, "A field with that name already exists.",
+                    "Rename field", JOptionPane.WARNING_MESSAGE);
+            fieldName.setText(storedName[0]);
+            return;
+        }
+        fields.remove(storedName[0]);
+        fields.put(name, fieldValue.getText());
+        storedName[0] = name;
+        item.setFields(fields);
+        project.markDirty();
+    }
+
+    private void saveFieldValue(String[] storedName, JTextArea fieldValue) {
+        if (updating || item == null || storedName[0].isEmpty()) return;
+        Map<String, String> fields = item.getFields();
+        fields.put(storedName[0], fieldValue.getText());
         item.setFields(fields);
         project.markDirty();
     }

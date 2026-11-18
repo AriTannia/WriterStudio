@@ -4,7 +4,7 @@ A Scrivener-inspired long-form writing and research application built with Java 
 
 ## Features
 
-- **Binder** - A Draft / Research / Trash tree. Create documents and folders,
+- **Project panel** - A Draft / Research / Trash tree. Create documents and folders,
   rename items with F2, drag items to reorganize them, move items up or down,
   and permanently delete items from Trash.
 - **Editor** - Rich-text editing with undo/redo, bold, italic, underline,
@@ -19,9 +19,9 @@ A Scrivener-inspired long-form writing and research application built with Java 
   and guidance for each beat.
 - **Novel spacing** - Paragraphs use novel-style spacing: first-line indentation,
   compact lines within paragraphs, and visible spacing between paragraphs.
-- **Scrivenings** - Select a folder or multiple documents to edit them as one
+- **Combined Draft** - Select a folder or multiple documents to edit them as one
   continuous view. Changes are saved back to the original documents.
-  Three-Act Structure cards can also be viewed in a structured Scrivenings
+  Three-Act Structure cards can also be viewed in a structured Combined Draft
   preview showing their title, summary, acts, and beats.
 - **Corkboard** - Editable index cards with title and synopsis. Select a card
   and use the fixed ordering controls to move it to the top, up, down, or
@@ -46,9 +46,9 @@ A Scrivener-inspired long-form writing and research application built with Java 
   image-backed graph nodes. The graph shows primary images, Character Class,
   custom roles, relationship labels, and supports double-click navigation.
   The graph includes zoom controls from 70% to 160%.
-- **Sidebar controls** - Toggle Binder and Inspector independently, or use Focus
+- **Sidebar controls** - Toggle Project and Details independently, or use Focus
   to hide both panels. The same controls are available from the View menu.
-- **Compile Draft** - Export the complete Draft as Markdown or plain text.
+- **Export Draft** - Export the complete Draft as Markdown or plain text.
 - **DOCX / PDF export** - Select folders or individual Draft cards and choose
   which child cards to include.
 - **Automatic saving** - The project saves every 30 seconds and when the
@@ -97,10 +97,10 @@ MyNovel/
 Ctrl/Cmd+N       New document
 Ctrl/Cmd+Shift+N New folder
 F2                Rename
-Delete            Move Binder selection to Trash
-Ctrl/Cmd+1..4    Editor / Scrivenings / Corkboard / Outliner
-Ctrl/Cmd+Alt+B   Toggle Binder
-Ctrl/Cmd+Alt+I   Toggle Inspector
+Delete            Move Project selection to Trash
+Ctrl/Cmd+1..4    Editor / Combined Draft / Corkboard / Outliner
+Ctrl/Cmd+Alt+B   Toggle Project panel
+Ctrl/Cmd+Alt+I   Toggle Details panel
 Ctrl/Cmd+S       Save
-Ctrl/Cmd+Shift+E Compile
+Ctrl/Cmd+Shift+E Export Draft
 ```

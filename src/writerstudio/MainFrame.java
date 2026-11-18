@@ -11,6 +11,7 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JSplitPane;
+import javax.swing.SwingWorker;
 import javax.swing.JToggleButton;
 import javax.swing.JToolBar;
 import javax.swing.KeyStroke;
@@ -20,18 +21,23 @@ import javax.swing.event.TreeModelListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.GridBagLayout;
+import java.awt.event.MouseAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 
 /**
  * The application window: Binder on the left, the Editor / Scrivenings / Corkboard /
@@ -51,18 +57,30 @@ public class MainFrame extends JFrame {
     private final CardLayout viewCards = new CardLayout();
     private final JPanel views = new JPanel(viewCards);
     private final JLabel status = new JLabel(" ");
+    private final JPanel busyGlass = new JPanel(new GridBagLayout());
+    private final JLabel busyMessage = new JLabel("Working\u2026");
+    private final Map<Component, Boolean> enabledBeforeTask = new IdentityHashMap<>();
     private final Map<Mode, JToggleButton> modeButtons = new EnumMap<>(Mode.class);
     private final Map<Mode, JMenuItem> modeMenuItems = new EnumMap<>(Mode.class);
     private final Timer refreshTimer;
     private final Timer autosaveTimer;
     private JSplitPane mainSplit;
+    private JSplitPane workspaceSplit;
     private JToggleButton binderToggle;
     private JToggleButton inspectorToggle;
     private JToggleButton focusToggle;
     private int binderWidth = 260;
+    private int inspectorWidth = 270;
+    private boolean inspectorVisible = true;
 
     private Mode mode = Mode.EDITOR;
     private List<Item> selection = new ArrayList<>();
+    private boolean backgroundTaskRunning;
+
+    @FunctionalInterface
+    private interface BackgroundOperation {
+        void run() throws Exception;
+    }
 
     public MainFrame(Project project) {
         super(project.getName() + " \u2014 Writer's Studio");
@@ -88,16 +106,29 @@ public class MainFrame extends JFrame {
         center.add(views, BorderLayout.CENTER);
 
         binder.setPreferredSize(new Dimension(binderWidth, 600));
-        mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, binder, center);
+        workspaceSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, center, inspector);
+        workspaceSplit.setResizeWeight(1.0);
+        workspaceSplit.setContinuousLayout(true);
+        workspaceSplit.setDividerLocation(0.74);
+        workspaceSplit.setOneTouchExpandable(true);
+
+        mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, binder, workspaceSplit);
         mainSplit.setDividerLocation(binderWidth);
         mainSplit.setResizeWeight(0);
         mainSplit.setContinuousLayout(true);
+        mainSplit.setOneTouchExpandable(true);
 
         status.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
         getContentPane().add(mainSplit, BorderLayout.CENTER);
-        getContentPane().add(inspector, BorderLayout.EAST);
         getContentPane().add(status, BorderLayout.SOUTH);
         setJMenuBar(buildMenuBar());
+        busyGlass.setOpaque(true);
+        busyGlass.setBackground(new java.awt.Color(238, 241, 245, 220));
+        busyGlass.setFocusable(true);
+        busyGlass.add(busyMessage);
+        busyGlass.addMouseListener(new MouseAdapter() { });
+        setGlassPane(busyGlass);
+        busyGlass.setVisible(false);
 
         // Rebuild corkboard / outliner / scrivenings after structural changes made elsewhere.
         refreshTimer = new Timer(120, e -> {
@@ -120,7 +151,9 @@ public class MainFrame extends JFrame {
 
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
-            @Override public void windowClosing(WindowEvent e) { closeWindow(true); }
+            @Override public void windowClosing(WindowEvent e) {
+                if (!backgroundTaskRunning) closeWindow(true);
+            }
         });
         setSize(1280, 800);
         setLocationRelativeTo(null);
@@ -134,17 +167,18 @@ public class MainFrame extends JFrame {
         bar.setFloatable(false);
         ButtonGroup group = new ButtonGroup();
         addModeButton(bar, group, Mode.EDITOR, "Editor", "Edit one document");
-        addModeButton(bar, group, Mode.SCRIVENINGS, "Scrivenings", "Edit a folder / several documents as one text");
+        addModeButton(bar, group, Mode.SCRIVENINGS, "Combined Draft",
+                "Read and edit selected documents as one continuous draft");
         addModeButton(bar, group, Mode.CORKBOARD, "Corkboard", "Index cards with synopses");
         addModeButton(bar, group, Mode.OUTLINER, "Outliner", "Outline with metadata");
         modeButtons.get(Mode.EDITOR).setSelected(true);
         bar.addSeparator();
-        binderToggle = sidePanelButton(bar, "Binder", "Show or hide the Binder panel", true,
+        binderToggle = sidePanelButton(bar, "Project", "Show or hide project contents", true,
                 () -> setBinderVisible(binderToggle.isSelected()));
-        inspectorToggle = sidePanelButton(bar, "Inspector", "Show or hide the Inspector panel", true,
+        inspectorToggle = sidePanelButton(bar, "Details", "Show or hide details for the selected item", true,
                 () -> setInspectorVisible(inspectorToggle.isSelected()));
-        focusToggle = new JToggleButton("Focus");
-        focusToggle.setToolTipText("Show or hide both side panels");
+        focusToggle = new JToggleButton("Focus Mode");
+        focusToggle.setToolTipText("Hide both side panels to make more room for writing");
         focusToggle.setFocusable(false);
         focusToggle.addActionListener(e -> setSidebarsVisible(!focusToggle.isSelected()));
         bar.add(focusToggle);
@@ -181,7 +215,7 @@ public class MainFrame extends JFrame {
         file.addSeparator();
         file.add(item("Save", KeyStroke.getKeyStroke(KeyEvent.VK_S, mask), () -> saveProject(true)));
         file.add(item("Import Files into Research\u2026", null, binder::importFiles));
-        file.add(item("Compile Draft\u2026", KeyStroke.getKeyStroke(KeyEvent.VK_E, mask | KeyEvent.SHIFT_DOWN_MASK), this::compile));
+        file.add(item("Export Draft\u2026", KeyStroke.getKeyStroke(KeyEvent.VK_E, mask | KeyEvent.SHIFT_DOWN_MASK), this::compile));
         file.add(item("Export Selected Content to DOCX\u2026", null, () -> exportDocument(false)));
         file.add(item("Export Selected Content to PDF\u2026", null, () -> exportDocument(true)));
         file.addSeparator();
@@ -203,13 +237,13 @@ public class MainFrame extends JFrame {
 
         JMenu view = new JMenu("View");
         addModeMenuItem(view, Mode.EDITOR, "Editor", KeyStroke.getKeyStroke(KeyEvent.VK_1, mask));
-        addModeMenuItem(view, Mode.SCRIVENINGS, "Scrivenings", KeyStroke.getKeyStroke(KeyEvent.VK_2, mask));
+        addModeMenuItem(view, Mode.SCRIVENINGS, "Combined Draft", KeyStroke.getKeyStroke(KeyEvent.VK_2, mask));
         addModeMenuItem(view, Mode.CORKBOARD, "Corkboard", KeyStroke.getKeyStroke(KeyEvent.VK_3, mask));
         addModeMenuItem(view, Mode.OUTLINER, "Outliner", KeyStroke.getKeyStroke(KeyEvent.VK_4, mask));
         view.addSeparator();
-        view.add(item("Show / Hide Inspector", KeyStroke.getKeyStroke(KeyEvent.VK_I, mask | KeyEvent.ALT_DOWN_MASK),
-                () -> setInspectorVisible(!inspector.isVisible())));
-        view.add(item("Show / Hide Binder", KeyStroke.getKeyStroke(KeyEvent.VK_B, mask | KeyEvent.ALT_DOWN_MASK),
+        view.add(item("Show / Hide Details", KeyStroke.getKeyStroke(KeyEvent.VK_I, mask | KeyEvent.ALT_DOWN_MASK),
+                () -> setInspectorVisible(!inspectorVisible)));
+        view.add(item("Show / Hide Project", KeyStroke.getKeyStroke(KeyEvent.VK_B, mask | KeyEvent.ALT_DOWN_MASK),
                 () -> setBinderVisible(!binder.isVisible())));
         view.add(item("Focus Mode (hide both panels)", null, () -> setSidebarsVisible(false)));
         view.add(item("Show Both Panels", null, () -> setSidebarsVisible(true)));
@@ -246,7 +280,16 @@ public class MainFrame extends JFrame {
     }
 
     private void setInspectorVisible(boolean visible) {
-        inspector.setVisible(visible);
+        if (visible && !inspectorVisible) {
+            inspector.setVisible(true);
+            int width = workspaceSplit.getWidth();
+            if (width > 0) workspaceSplit.setDividerLocation(Math.max(360, width - inspectorWidth));
+        } else if (!visible && inspectorVisible) {
+            int width = workspaceSplit.getWidth();
+            if (width > 0) inspectorWidth = Math.max(220, width - workspaceSplit.getDividerLocation());
+            inspector.setVisible(false);
+        }
+        inspectorVisible = visible;
         if (inspectorToggle != null) inspectorToggle.setSelected(visible);
         if (focusToggle != null && visible) focusToggle.setSelected(false);
         revalidate();
@@ -386,13 +429,14 @@ public class MainFrame extends JFrame {
 
     private void showEditor(boolean scrivenings) {
         if (selection.isEmpty()) {
-            editor.showEmpty("Select a document in the Binder.");
+            editor.showEmpty("Select a document in Project.");
             return;
         }
         if (!scrivenings) {
             Item it = selection.get(0);
             if (it.getKind() == Item.Kind.FILE) editor.showFile(it, project.resolve(it));
-            else if (it.isSpecial()) editor.showEmpty("\u201c" + it.getTitle() + "\u201d is a top-level folder. Select a document, or use Scrivenings / Corkboard / Outliner to see its contents.");
+            else if (it.isSpecial()) editor.showEmpty("\u201c" + it.getTitle()
+                    + "\u201d is a top-level folder. Select a document, or use Combined Draft, Corkboard, or Outliner to see its contents.");
             else editor.showSections(List.of(it));
             return;
         }
@@ -455,24 +499,28 @@ public class MainFrame extends JFrame {
     // ---- file operations -------------------------------------------------------------------------------------------
 
     private void saveProject(boolean announce) {
+        saveProject(announce, null);
+    }
+
+    private void saveProject(boolean announce, Runnable afterSuccess) {
         editor.flush();
-        if (!project.isDirty() && !announce) return;
-        try {
-            project.save();
+        if (!project.isDirty() && !announce) {
+            if (afterSuccess != null) afterSuccess.run();
+            return;
+        }
+        runInBackground("Saving project\u2026", "Save failed", project::save, () -> {
             if (announce) {
                 editor.showSaveNotice("\u2713 Saved");
                 status.setText("Saved");
             }
-        } catch (IOException ex) {
-            JOptionPane.showMessageDialog(this, "Could not save the project:\n" + ex.getMessage(),
-                    "Save failed", JOptionPane.ERROR_MESSAGE);
-        }
+            if (afterSuccess != null) afterSuccess.run();
+        });
     }
 
     private void compile() {
         editor.flush();
         JFileChooser fc = new JFileChooser(project.getDir());
-        fc.setDialogTitle("Compile Draft");
+        fc.setDialogTitle("Export Draft");
         fc.addChoosableFileFilter(new FileNameExtensionFilter("Markdown (*.md)", "md"));
         fc.addChoosableFileFilter(new FileNameExtensionFilter("Plain text (*.txt)", "txt"));
         fc.setFileFilter(fc.getChoosableFileFilters()[1]);
@@ -483,13 +531,9 @@ public class MainFrame extends JFrame {
         int r = JOptionPane.showConfirmDialog(this, "Include document titles as headings?", "Compile",
                 JOptionPane.YES_NO_CANCEL_OPTION);
         if (r == JOptionPane.CANCEL_OPTION || r == JOptionPane.CLOSED_OPTION) return;
-        try {
-            project.compile(out, markdown, r == JOptionPane.YES_OPTION);
-            status.setText("Compiled to " + out.getAbsolutePath());
-        } catch (IOException ex) {
-            JOptionPane.showMessageDialog(this, "Compile failed:\n" + ex.getMessage(), "Compile",
-                    JOptionPane.ERROR_MESSAGE);
-        }
+        runInBackground("Compiling draft\u2026", "Compile failed",
+                () -> project.compile(out, markdown, r == JOptionPane.YES_OPTION),
+                () -> status.setText("Exported Draft to " + out.getAbsolutePath()));
     }
 
     private void exportDocument(boolean pdf) {
@@ -508,13 +552,68 @@ public class MainFrame extends JFrame {
             if (!out.getName().toLowerCase().endsWith("." + extension)) {
                 out = new File(out.getParentFile(), out.getName() + "." + extension);
             }
-            try {
-                if (pdf) ExportService.exportPdf(out, project, selected);
-                else ExportService.exportDocx(out, project, selected);
-                status.setText("Exported to " + out.getAbsolutePath());
-            } catch (IOException ex) {
-                JOptionPane.showMessageDialog(this, "Export failed:\n" + ex.getMessage(),
-                        "Export failed", JOptionPane.ERROR_MESSAGE);
+            File exportFile = out;
+            runInBackground("Exporting document\u2026", "Export failed", () -> {
+                if (pdf) ExportService.exportPdf(exportFile, project, selected);
+                else ExportService.exportDocx(exportFile, project, selected);
+            }, () -> status.setText("Exported to " + exportFile.getAbsolutePath()));
+    }
+
+    private void runInBackground(String message, String errorTitle,
+                                 BackgroundOperation operation, Runnable afterSuccess) {
+        if (backgroundTaskRunning) return;
+        backgroundTaskRunning = true;
+        busyMessage.setText(message);
+        setUiBusy(true);
+        busyGlass.setVisible(true);
+        busyGlass.requestFocusInWindow();
+        new SwingWorker<Void, Void>() {
+            @Override protected Void doInBackground() throws Exception {
+                operation.run();
+                return null;
+            }
+
+            @Override protected void done() {
+                backgroundTaskRunning = false;
+                busyGlass.setVisible(false);
+                setUiBusy(false);
+                try {
+                    get();
+                    afterSuccess.run();
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    JOptionPane.showMessageDialog(MainFrame.this,
+                            "The operation was interrupted.", errorTitle, JOptionPane.ERROR_MESSAGE);
+                } catch (ExecutionException ex) {
+                    Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+                    JOptionPane.showMessageDialog(MainFrame.this,
+                            cause.getMessage() == null ? cause.toString() : cause.getMessage(),
+                            errorTitle, JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private void setUiBusy(boolean busy) {
+        if (busy) {
+            enabledBeforeTask.clear();
+            setEnabledRecursively(getContentPane(), false);
+            if (getJMenuBar() != null) setEnabledRecursively(getJMenuBar(), false);
+        } else {
+            for (Map.Entry<Component, Boolean> entry : enabledBeforeTask.entrySet()) {
+                entry.getKey().setEnabled(entry.getValue());
+            }
+            enabledBeforeTask.clear();
+        }
+    }
+
+    private void setEnabledRecursively(Component component, boolean enabled) {
+        enabledBeforeTask.put(component, component.isEnabled());
+        component.setEnabled(enabled);
+        if (component instanceof Container) {
+            for (Component child : ((Container) component).getComponents()) {
+                setEnabledRecursively(child, enabled);
+            }
         }
     }
 
@@ -529,13 +628,17 @@ public class MainFrame extends JFrame {
     }
 
     private void switchTo(Project p) {
-        saveProject(false);
-        Main.show(p);
-        closeWindow(false);
+        saveProject(false, () -> {
+            Main.show(p);
+            finishClose(false);
+        });
     }
 
     private void closeWindow(boolean exit) {
-        saveProject(false);
+        saveProject(false, () -> finishClose(exit));
+    }
+
+    private void finishClose(boolean exit) {
         refreshTimer.stop();
         autosaveTimer.stop();
         dispose();

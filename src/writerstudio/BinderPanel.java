@@ -20,6 +20,7 @@ import javax.swing.tree.TreeSelectionModel;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Font;
+import java.awt.Insets;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
 import java.awt.event.ActionEvent;
@@ -40,6 +41,7 @@ import java.util.function.Consumer;
 public class BinderPanel extends JPanel {
     private final Project project;
     private final JTree tree;
+    private final JPopupMenu contextMenu = new JPopupMenu();
     private final Runnable beforeChange;
     private final Runnable afterStructure;
     private Consumer<List<Item>> selectionListener = l -> { };
@@ -76,19 +78,6 @@ public class BinderPanel extends JPanel {
             @Override public void actionPerformed(ActionEvent e) { deleteSelected(); }
         });
 
-        JPopupMenu menu = new JPopupMenu();
-        menu.add(menuItem("New Document", this::newDocument));
-        menu.add(menuItem("New Folder", this::newFolder));
-        menu.add(menuItem("New Research Item\u2026", this::newResearchItem));
-        menu.add(menuItem("New Relationships Folder", this::newRelationshipFolder));
-        menu.add(menuItem("Import Files into Research\u2026", this::importFiles));
-        menu.addSeparator();
-        menu.add(menuItem("Rename", this::renameSelected));
-        menu.add(menuItem("Move Up", this::moveUp));
-        menu.add(menuItem("Move Down", this::moveDown));
-        menu.addSeparator();
-        menu.add(menuItem("Move to Trash / Delete", this::deleteSelected));
-        menu.add(menuItem("Empty Trash", this::emptyTrash));
         tree.addMouseListener(new MouseAdapter() {
             @Override public void mousePressed(MouseEvent e) { popup(e); }
             @Override public void mouseReleased(MouseEvent e) { popup(e); }
@@ -96,7 +85,8 @@ public class BinderPanel extends JPanel {
                 if (!e.isPopupTrigger()) return;
                 TreePath p = tree.getPathForLocation(e.getX(), e.getY());
                 if (p != null && !tree.isPathSelected(p)) tree.setSelectionPath(p);
-                menu.show(tree, e.getX(), e.getY());
+                rebuildContextMenu();
+                contextMenu.show(tree, e.getX(), e.getY());
             }
         });
 
@@ -121,8 +111,56 @@ public class BinderPanel extends JPanel {
 
     private static JMenuItem menuItem(String text, Runnable r) {
         JMenuItem m = new JMenuItem(text);
+        m.setMargin(new Insets(5, 12, 5, 12));
         m.addActionListener(e -> r.run());
         return m;
+    }
+
+    private void rebuildContextMenu() {
+        contextMenu.removeAll();
+        contextMenu.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 4, 4, 4));
+        List<Item> selected = selectedItems();
+        Item current = selected.isEmpty() ? null : selected.get(0);
+        Item.Special zone = current == null ? Item.Special.DRAFT : current.zone();
+
+        if (zone == Item.Special.DRAFT) {
+            contextMenu.add(menuItem("New Document", this::newDocument));
+            contextMenu.add(menuItem("New Folder", this::newFolder));
+        } else if (zone == Item.Special.RESEARCH) {
+            Item parent = researchParent();
+            if (parent != null && parent.isRelationshipFolder()) {
+                contextMenu.add(menuItem("Add Character to Graph",
+                        () -> createResearchItem(Item.ResearchType.CHARACTER)));
+            } else {
+                contextMenu.add(menuItem("New Research Card\u2026", this::newResearchItem));
+                contextMenu.add(menuItem("New Folder\u2026", this::chooseResearchFolder));
+                contextMenu.add(menuItem("Import Files into Research\u2026", this::importFiles));
+            }
+        }
+
+        boolean hasDeletableItems = selected.stream().anyMatch(item -> !item.isSpecial());
+        if (hasDeletableItems) {
+            contextMenu.addSeparator();
+            if (selected.size() == 1 && !current.isSpecial()) {
+                contextMenu.add(menuItem("Rename", this::renameSelected));
+                contextMenu.add(menuItem("Move Up", this::moveUp));
+                contextMenu.add(menuItem("Move Down", this::moveDown));
+            }
+            contextMenu.add(menuItem(zone == Item.Special.TRASH
+                    ? "Delete Permanently" : "Move to Trash", this::deleteSelected));
+        }
+        if (current == project.trash()) {
+            if (contextMenu.getComponentCount() > 0) contextMenu.addSeparator();
+            contextMenu.add(menuItem("Empty Trash", this::emptyTrash));
+        }
+    }
+
+    private void chooseResearchFolder() {
+        Object[] options = {"Standard Folder", "Relationships Folder"};
+        int choice = JOptionPane.showOptionDialog(this, "Choose a Research folder type:", "New Folder",
+                JOptionPane.DEFAULT_OPTION, JOptionPane.PLAIN_MESSAGE, null, options, options[0]);
+        if (choice == 0) newFolder();
+        else if (choice == 1) newRelationshipFolder();
     }
 
     public void setSelectionListener(Consumer<List<Item>> l) { this.selectionListener = l; }

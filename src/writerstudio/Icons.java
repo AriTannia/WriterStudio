@@ -61,21 +61,6 @@ final class Icons {
         };
     }
 
-    static Icon edit() {
-        return new Icon16(16, 16) {
-            @Override void draw(Graphics2D g) {
-                g.setColor(new Color(0x3569A8));
-                g.setStroke(new java.awt.BasicStroke(2.2f));
-                g.drawLine(4, 12, 12, 4);
-                g.drawLine(3, 13, 6, 12);
-                g.drawLine(4, 10, 7, 13);
-                g.setColor(new Color(0x8AB4E8));
-                g.fillRect(10, 2, 3, 3);
-            }
-
-        };
-    }
-
     static Icon primary() {
         return new Icon16(16, 16) {
             @Override void draw(Graphics2D g) {

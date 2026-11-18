@@ -167,7 +167,7 @@ public class EditorPanel extends JPanel {
         stack.add(emptyLabel, "empty");
         add(formatBar, BorderLayout.NORTH);
         add(stack, BorderLayout.CENTER);
-        showEmpty("Select a document in the Binder.");
+        showEmpty("Select a document in Project.");
     }
 
     // ---- showing content ---------------------------------------------------------------------
