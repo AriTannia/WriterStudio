@@ -63,7 +63,6 @@ public class MainFrame extends JFrame {
     private final Map<Mode, JToggleButton> modeButtons = new EnumMap<>(Mode.class);
     private final Map<Mode, JMenuItem> modeMenuItems = new EnumMap<>(Mode.class);
     private final Timer refreshTimer;
-    private final Timer autosaveTimer;
     private JSplitPane mainSplit;
     private JSplitPane workspaceSplit;
     private JToggleButton binderToggle;
@@ -145,9 +144,6 @@ public class MainFrame extends JFrame {
                 if (!project.muted) refreshTimer.restart();
             }
         });
-
-        autosaveTimer = new Timer(30_000, e -> saveProject(false));
-        autosaveTimer.start();
 
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
@@ -628,19 +624,33 @@ public class MainFrame extends JFrame {
     }
 
     private void switchTo(Project p) {
-        saveProject(false, () -> {
+        confirmSaveBeforeLeaving(() -> {
             Main.show(p);
             finishClose(false);
         });
     }
 
     private void closeWindow(boolean exit) {
-        saveProject(false, () -> finishClose(exit));
+        confirmSaveBeforeLeaving(() -> finishClose(exit));
+    }
+
+    private void confirmSaveBeforeLeaving(Runnable continueAction) {
+        editor.flush();
+        if (!project.isDirty()) {
+            continueAction.run();
+            return;
+        }
+        Object[] choices = {"Save", "Don't Save", "Cancel"};
+        int choice = JOptionPane.showOptionDialog(this,
+                "Save changes to this project before leaving?",
+                "Unsaved changes", JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE,
+                null, choices, choices[0]);
+        if (choice == 0) saveProject(true, continueAction);
+        else if (choice == 1) continueAction.run();
     }
 
     private void finishClose(boolean exit) {
         refreshTimer.stop();
-        autosaveTimer.stop();
         dispose();
         if (exit) System.exit(0);
     }

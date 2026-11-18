@@ -194,9 +194,16 @@ public class Item extends DefaultMutableTreeNode {
     public void setContent(String c) {
         c = c == null ? "" : c;
         if (!c.equals(content)) {
+            int previousWords = words();
             content = c;
             contentDirty = true;
-            invalidateWordCounts();
+            wordsCache = Util.words(content);
+            wordsDirty = false;
+            int delta = wordsCache - previousWords;
+            for (Item node = this; node != null;
+                 node = node.getParent() instanceof Item ? (Item) node.getParent() : null) {
+                if (!node.totalWordsDirty) node.totalWordsCache += delta;
+            }
         }
     }
 

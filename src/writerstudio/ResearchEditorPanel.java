@@ -563,7 +563,7 @@ public final class ResearchEditorPanel extends JPanel {
         fieldRows.repaint();
     }
 
-    private static final ThreeActField[] THREE_ACT_FIELDS = {
+    static final ThreeActField[] THREE_ACT_FIELDS = {
             new ThreeActField("1. Opening Image", "0-1%",
                     "Image showing the initial state of the character and world."),
             new ThreeActField("2. Theme Stated", "5%",
@@ -687,10 +687,10 @@ public final class ResearchEditorPanel extends JPanel {
         fieldRows.add(row);
     }
 
-    private static final class ThreeActField {
-        private final String name;
-        private final String range;
-        private final String description;
+    static final class ThreeActField {
+        final String name;
+        final String range;
+        final String description;
 
         ThreeActField(String name, String range, String description) {
             this.name = name;
