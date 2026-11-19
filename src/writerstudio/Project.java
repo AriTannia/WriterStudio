@@ -6,6 +6,8 @@ import org.w3c.dom.NodeList;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.rtf.RTFEditorKit;
 import javax.swing.tree.DefaultTreeModel;
+import javax.swing.event.TreeModelEvent;
+import javax.swing.event.TreeModelListener;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.OutputKeys;
@@ -28,6 +30,7 @@ import java.util.HashSet;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.Set;
 import java.util.UUID;
 
@@ -57,6 +60,7 @@ public final class Project {
     private final String name;
     private final Item root, draft, research, trash;
     private final DefaultTreeModel model;
+    private final Map<String, Item> itemsById = new HashMap<>();
     private final List<RelationshipLink> relationships = new ArrayList<>();
     private boolean dirty;
 
@@ -71,6 +75,37 @@ public final class Project {
         this.research = special(root, Item.Special.RESEARCH, "Research");
         this.trash = special(root, Item.Special.TRASH, "Trash");
         this.model = new DefaultTreeModel(root);
+        indexSubtree(root);
+        this.model.addTreeModelListener(new TreeModelListener() {
+            @Override public void treeNodesChanged(TreeModelEvent event) { }
+
+            @Override public void treeNodesInserted(TreeModelEvent event) {
+                Object[] children = event.getChildren();
+                if (children != null) for (Object child : children) {
+                    if (child instanceof Item) indexSubtree((Item) child);
+                }
+            }
+
+            @Override public void treeNodesRemoved(TreeModelEvent event) {
+                Object[] children = event.getChildren();
+                if (children != null) for (Object child : children) {
+                    if (child instanceof Item) unindexSubtree((Item) child);
+                }
+            }
+
+            @Override public void treeStructureChanged(TreeModelEvent event) {
+                itemsById.clear();
+                indexSubtree(root);
+            }
+        });
+    }
+
+    private void indexSubtree(Item item) {
+        for (Item node : item.subtree()) itemsById.put(node.getId(), node);
+    }
+
+    private void unindexSubtree(Item item) {
+        for (Item node : item.subtree()) itemsById.remove(node.getId(), node);
     }
 
     private static Item special(Item root, Item.Special s, String title) {
@@ -93,8 +128,7 @@ public final class Project {
     public List<RelationshipLink> relationships() { return new ArrayList<>(relationships); }
     public Item findItem(String id) {
         if (id == null || id.isEmpty()) return null;
-        for (Item item : root.subtree()) if (id.equals(item.getId())) return item;
-        return null;
+        return itemsById.get(id);
     }
     public void addRelationship(RelationshipLink link) {
         relationships.removeIf(existing -> existing.getFromId().equals(link.getFromId())
@@ -208,13 +242,15 @@ public final class Project {
         c2.setLabel("Chapter");
         c2.add(doc("C\u1ea3nh 1 \u2013 Th\u1ecb tr\u1ea5n bi\u1ec3n",
                 "Mai g\u1eb7p ng\u01b0\u1eddi ch\u1ee7 nh\u00e0 tr\u1ecd.", "", "Scene", "To Do"));
-        draft.add(c1);
-        draft.add(c2);
-        research.add(doc("Nh\u00e2n v\u1eadt: Mai",
+        insert(c1, draft, draft.getChildCount());
+        insert(c2, draft, draft.getChildCount());
+        insert(doc("Nh\u00e2n v\u1eadt: Mai",
                 "Ghi ch\u00fa v\u1ec1 nh\u00e2n v\u1eadt ch\u00ednh.",
-                "Mai, 28 tu\u1ed5i, bi\u00ean t\u1eadp vi\u00ean. Hay im l\u1eb7ng, th\u00edch nghe m\u01b0a.", "Research", NONE));
-        research.add(doc("B\u1ed1i c\u1ea3nh: th\u1ecb tr\u1ea5n bi\u1ec3n",
-                "", "M\u00f9a gi\u00f3 l\u1edbn, nh\u00e0 g\u1ed7 s\u01a1n xanh, ch\u1ee3 c\u00e1 bu\u1ed5i s\u00e1ng.", "Research", NONE));
+                "Mai, 28 tu\u1ed5i, bi\u00ean t\u1eadp vi\u00ean. Hay im l\u1eb7ng, th\u00edch nghe m\u01b0a.", "Research", NONE),
+                research, research.getChildCount());
+        insert(doc("B\u1ed1i c\u1ea3nh: th\u1ecb tr\u1ea5n bi\u1ec3n",
+                "", "M\u00f9a gi\u00f3 l\u1edbn, nh\u00e0 g\u1ed7 s\u01a1n xanh, ch\u1ee3 c\u00e1 bu\u1ed5i s\u00e1ng.", "Research", NONE),
+                research, research.getChildCount());
     }
 
     public static Project load(File dir) throws Exception {
@@ -286,8 +322,6 @@ public final class Project {
             Element c = (Element) kids.item(i);
             if ("synopsis".equals(c.getTagName())) it.setSynopsis(c.getTextContent());
             else if ("item".equals(c.getTagName()) && kind != Item.Kind.FILE) it.add(fromXml(c, dir));
-            else if ("role".equals(c.getTagName())) it.getRoles().add(c.getTextContent());
-            else if ("link".equals(c.getTagName())) it.getLinkedCardIds().add(c.getAttribute("id"));
             else if ("image".equals(c.getTagName())) {
                 List<ResearchImage> images = it.getImages();
                 images.add(new ResearchImage(c.getAttribute("file"), c.getAttribute("caption")));

@@ -225,7 +225,7 @@ public class InspectorPanel extends JPanel {
             status.setEnabled(on && !it.isSpecial());
             include.setEnabled(on && !it.isSpecial());
             if (!on) {
-                title.setText("Inspector");
+                title.setText("Details");
                 synopsis.setText("");
                 stats.setText("Select one item to see its details.");
             } else {

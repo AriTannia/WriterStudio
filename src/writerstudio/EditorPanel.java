@@ -49,6 +49,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -60,6 +61,9 @@ import java.util.Map;
 public class EditorPanel extends JPanel {
     /** Paragraph attribute marking a read-only separator line in Scrivenings mode. */
     static final Object HDR = "writerstudio.separator";
+    private static final Object STRUCTURE_HEADER = "writerstudio.structure.header";
+    private static final Object STRUCTURE_FIELD = "writerstudio.structure.field";
+    private static final String SUMMARY_FIELD = "writerstudio.structure.summary";
 
     private final Project project;
     private final Runnable onFlushed;
@@ -85,16 +89,20 @@ public class EditorPanel extends JPanel {
     private final SimpleAttributeSet paraBody = new SimpleAttributeSet();
     private final SimpleAttributeSet paraBlank = new SimpleAttributeSet();
     private final SimpleAttributeSet paraSeparator = new SimpleAttributeSet();
+    private final SimpleAttributeSet structureTitle = new SimpleAttributeSet();
+    private final SimpleAttributeSet structureHeading = new SimpleAttributeSet();
+    private final SimpleAttributeSet structureLabel = new SimpleAttributeSet();
 
     private List<Item> sections = new ArrayList<>();
     private UndoManager undo = new UndoManager();
+    private Item structureItem;
 
     public EditorPanel(Project project, Runnable onFlushed) {
         super(new BorderLayout());
         this.project = project;
         this.onFlushed = onFlushed;
 
-        StyleConstants.setFontFamily(body, "Serif");
+        StyleConstants.setFontFamily(body, "JetBrains Sans");
         StyleConstants.setFontSize(body, 17);
         StyleConstants.setForeground(body, pane.getForeground());
 
@@ -116,6 +124,23 @@ public class EditorPanel extends JPanel {
         StyleConstants.setSpaceAbove(paraSeparator, 16f);
         StyleConstants.setSpaceBelow(paraSeparator, 6f);
         paraSeparator.addAttribute(HDR, Boolean.TRUE);
+
+        StyleConstants.setFontFamily(structureTitle, "SansSerif");
+        StyleConstants.setFontSize(structureTitle, 28);
+        StyleConstants.setBold(structureTitle, true);
+        StyleConstants.setSpaceAbove(structureTitle, 8f);
+        StyleConstants.setSpaceBelow(structureTitle, 18f);
+
+        StyleConstants.setFontFamily(structureHeading, "SansSerif");
+        StyleConstants.setFontSize(structureHeading, 18);
+        StyleConstants.setBold(structureHeading, true);
+        StyleConstants.setForeground(structureHeading, new Color(0x596579));
+        StyleConstants.setSpaceAbove(structureHeading, 18f);
+        StyleConstants.setSpaceBelow(structureHeading, 8f);
+
+        StyleConstants.setFontFamily(structureLabel, "SansSerif");
+        StyleConstants.setFontSize(structureLabel, 17);
+        StyleConstants.setBold(structureLabel, true);
 
         setBackground(new Color(0xEEF1F5));
         pane.setMargin(new Insets(24, 48, 24, 48));
@@ -147,7 +172,7 @@ public class EditorPanel extends JPanel {
         stack.add(emptyLabel, "empty");
         add(formatBar, BorderLayout.NORTH);
         add(stack, BorderLayout.CENTER);
-        showEmpty("Select a document in the Binder.");
+        showEmpty("Select a document in Project.");
     }
 
     // ---- showing content ---------------------------------------------------------------------
@@ -155,6 +180,7 @@ public class EditorPanel extends JPanel {
     public void showEmpty(String message) {
         flush();
         sections = new ArrayList<>();
+        structureItem = null;
         emptyLabel.setText(message);
         setFormatBarEnabled(false);
         cards.show(stack, "empty");
@@ -163,9 +189,85 @@ public class EditorPanel extends JPanel {
     public void showFile(Item item, File file) {
         flush();
         sections = new ArrayList<>();
+        structureItem = null;
         viewer.show(item, file);
         setFormatBarEnabled(false);
         cards.show(stack, "file");
+    }
+
+    /** Shows a Three-Act Structure card in the same continuous editor used by Draft cards. */
+    public void showThreeActStructure(Item item) {
+        flush();
+        sections = new ArrayList<>();
+        structureItem = item;
+        setFormatBarEnabled(true);
+        pane.setEditable(true);
+        DefaultStyledDocument doc = new DefaultStyledDocument();
+        int summaryStart;
+        try {
+            appendStructureLine(doc, item.getTitle(), structureTitle, true);
+            appendStructureLine(doc, "Summary", structureHeading, true);
+            summaryStart = doc.getLength();
+            appendStructureValue(doc, SUMMARY_FIELD, item.getContent(), true);
+            appendStructureGroup(doc, "ACT I - SETUP  0-25%", 0, 5, item);
+            appendStructureGroup(doc, "ACT II - CONFRONTATION  25-75%", 6, 12, item);
+            appendStructureGroup(doc, "ACT III - RESOLUTION  80-100%", 13, 14, item);
+        } catch (BadLocationException e) {
+            throw new IllegalStateException(e);
+        }
+        pane.setDocument(doc);
+        undo = new UndoManager();
+        undo.setLimit(500);
+        doc.addUndoableEditListener(undo);
+        doc.addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent event) { flushTimer.restart(); }
+            @Override public void removeUpdate(DocumentEvent event) { flushTimer.restart(); }
+            @Override public void changedUpdate(DocumentEvent event) { }
+        });
+        doc.setDocumentFilter(new StructureFilter());
+        pane.setCaretPosition(Math.min(summaryStart, doc.getLength()));
+        cards.show(stack, "text");
+        pane.requestFocusInWindow();
+        updateFormatControls();
+    }
+
+    private void appendStructureGroup(DefaultStyledDocument doc, String title, int first, int last, Item item)
+            throws BadLocationException {
+        appendStructureLine(doc, title, structureHeading, true);
+        Map<String, String> fields = item.getFields();
+        for (int i = first; i <= last; i++) {
+            ResearchEditorPanel.ThreeActField beat = ResearchEditorPanel.THREE_ACT_FIELDS[i];
+            appendStructureLine(doc, beat.name + (beat.range.isEmpty() ? "" : "  " + beat.range),
+                    structureLabel, true);
+            appendStructureLine(doc, beat.description, separatorChars, true);
+            appendStructureValue(doc, beat.name, fields.get(beat.name), i < 14);
+        }
+    }
+
+    private void appendStructureLine(DefaultStyledDocument doc, String text,
+                                     SimpleAttributeSet style, boolean readOnly) throws BadLocationException {
+        int start = doc.getLength();
+        doc.insertString(start, text + "\n", style);
+        if (readOnly) {
+            SimpleAttributeSet marker = new SimpleAttributeSet(doc.getParagraphElement(start).getAttributes());
+            marker.removeAttribute(STRUCTURE_FIELD);
+            marker.addAttribute(STRUCTURE_HEADER, Boolean.TRUE);
+            doc.setParagraphAttributes(start, 1, marker, true);
+        }
+    }
+
+    /** Appends one editable value paragraph, tagged so it can be written back to its model field. */
+    private void appendStructureValue(DefaultStyledDocument doc, String key, String value, boolean terminate)
+            throws BadLocationException {
+        int start = doc.getLength();
+        String text = value == null ? "" : value;
+        SimpleAttributeSet attributes = new SimpleAttributeSet(body);
+        attributes.addAttribute(STRUCTURE_FIELD, key);
+        doc.insertString(start, text, attributes);
+        SimpleAttributeSet paragraph = new SimpleAttributeSet(paraBody);
+        paragraph.addAttribute(STRUCTURE_FIELD, key);
+        doc.setParagraphAttributes(start, Math.max(1, text.length()), paragraph, true);
+        if (terminate) doc.insertString(doc.getLength(), "\n", body);
     }
 
     /**
@@ -179,6 +281,8 @@ public class EditorPanel extends JPanel {
             return;
         }
         setFormatBarEnabled(true);
+        pane.setEditable(true);
+        structureItem = null;
         sections = new ArrayList<>(items);
         boolean headers = items.size() > 1;
 
@@ -261,9 +365,10 @@ public class EditorPanel extends JPanel {
         formatBar.addSeparator();
 
         fontBox = new JComboBox<>(new String[] {
-                "Serif", "SansSerif", "Monospaced",
-                "JetBrains Sans", "JetBrains Sans NL", "JetBrains Mono", "JetBrains Mono NL"
+                "JetBrains Sans", "JetBrains Sans NL", "JetBrains Mono", "JetBrains Mono NL",
+                "Serif", "SansSerif", "Monospaced"
         });
+        fontBox.setSelectedItem("JetBrains Sans");
         fontBox.setToolTipText("Font");
         fontBox.addActionListener(e -> {
             if (updatingFormatControls) return;
@@ -382,7 +487,7 @@ public class EditorPanel extends JPanel {
     }
 
     private static class EditorStyle {
-        String family = "Serif";
+        String family = "JetBrains Sans";
         int size = 17;
         boolean bold;
         boolean italic;
@@ -412,7 +517,10 @@ public class EditorPanel extends JPanel {
     /** Copies the editor text back into the items it came from. */
     public void flush() {
         flushTimer.stop();
-        if (sections.isEmpty()) return;
+        if (sections.isEmpty()) {
+            flushStructure();
+            return;
+        }
         try {
             StyledDocument doc = pane.getStyledDocument();
             String text = doc.getText(0, doc.getLength());
@@ -432,6 +540,55 @@ public class EditorPanel extends JPanel {
             if (changed) onFlushed.run();
         } catch (BadLocationException e) {
             throw new IllegalStateException(e);
+        }
+    }
+
+    private void flushStructure() {
+        if (structureItem == null) return;
+        StyledDocument doc = pane.getStyledDocument();
+        Map<String, String> fields = structureItem.getFields();
+        boolean fieldsChanged = false;
+        boolean changed = false;
+        try {
+            Map<String, StringBuilder> values = new LinkedHashMap<>();
+            Element root = doc.getDefaultRootElement();
+            for (int i = 0; i < root.getElementCount(); i++) {
+                Element paragraph = root.getElement(i);
+                Object field = paragraph.getAttributes().getAttribute(STRUCTURE_FIELD);
+                if (!(field instanceof String)) continue;
+                String key = (String) field;
+                int start = paragraph.getStartOffset();
+                int end = Math.min(paragraph.getEndOffset(), doc.getLength());
+                String value = doc.getText(start, Math.max(0, end - start));
+                if (value.endsWith("\n")) value = value.substring(0, value.length() - 1);
+                boolean hasPreviousParagraph = values.containsKey(key);
+                StringBuilder combined = values.computeIfAbsent(key, unused -> new StringBuilder());
+                if (hasPreviousParagraph) combined.append('\n');
+                combined.append(value);
+            }
+            for (Map.Entry<String, StringBuilder> entry : values.entrySet()) {
+                String key = entry.getKey();
+                String value = entry.getValue().toString();
+                if (SUMMARY_FIELD.equals(key)) {
+                    if (!value.equals(structureItem.getContent())) {
+                        structureItem.setContent(value);
+                        changed = true;
+                    }
+                } else if (!value.equals(fields.get(key))) {
+                    fields.put(key, value);
+                    fieldsChanged = true;
+                }
+            }
+        } catch (BadLocationException e) {
+            throw new IllegalStateException(e);
+        }
+        if (fieldsChanged) {
+            structureItem.setFields(fields);
+            changed = true;
+        }
+        if (changed) {
+            project.markDirty();
+            onFlushed.run();
         }
     }
 
@@ -469,6 +626,73 @@ public class EditorPanel extends JPanel {
             if (undo.canRedo()) undo.redo();
         } catch (CannotRedoException ignored) {
             // nothing to redo
+        }
+    }
+
+    private static boolean isStructureHeader(Element paragraph) {
+        return paragraph.getAttributes().containsAttribute(STRUCTURE_HEADER, Boolean.TRUE);
+    }
+
+    /** Keeps the Three-Act title, act names, beat names, and guidance read-only. */
+    private class StructureFilter extends DocumentFilter {
+        private boolean headerAt(StyledDocument doc, int offset) {
+            if (doc.getLength() == 0) return false;
+            int safeOffset = Math.max(0, Math.min(offset, doc.getLength() - 1));
+            return isStructureHeader(doc.getParagraphElement(safeOffset));
+        }
+
+        private boolean blocked(StyledDocument doc, int offset, int length) {
+            int end = offset + length;
+            int position = offset;
+            while (position < end) {
+                Element paragraph = doc.getParagraphElement(position);
+                if (isStructureHeader(paragraph)) return true;
+                position = Math.max(paragraph.getEndOffset(), position + 1);
+            }
+            if (length > 0 && end <= doc.getLength()) {
+                Element next = doc.getParagraphElement(end);
+                if (next.getStartOffset() == end && isStructureHeader(next)) return true;
+            }
+            return false;
+        }
+
+        private String fieldAt(StyledDocument doc, int offset) {
+            if (doc.getLength() == 0) return null;
+            int safeOffset = Math.max(0, Math.min(offset, doc.getLength() - 1));
+            Object field = doc.getParagraphElement(safeOffset).getAttributes().getAttribute(STRUCTURE_FIELD);
+            return field instanceof String ? (String) field : null;
+        }
+
+        private AttributeSet attributesFor(String field) {
+            SimpleAttributeSet attrs = new SimpleAttributeSet(body);
+            if (field != null) attrs.addAttribute(STRUCTURE_FIELD, field);
+            return attrs;
+        }
+
+        @Override public void insertString(FilterBypass fb, int offset, String text,
+                                           javax.swing.text.AttributeSet attrs)
+                throws BadLocationException {
+            StyledDocument doc = (StyledDocument) fb.getDocument();
+            String field = fieldAt(doc, offset);
+            if (headerAt(doc, offset) || field == null) { Toolkit.getDefaultToolkit().beep(); return; }
+            super.insertString(fb, offset, text, attributesFor(field));
+        }
+
+        @Override public void remove(FilterBypass fb, int offset, int length) throws BadLocationException {
+            StyledDocument doc = (StyledDocument) fb.getDocument();
+            if (blocked(doc, offset, length)) { Toolkit.getDefaultToolkit().beep(); return; }
+            super.remove(fb, offset, length);
+        }
+
+        @Override public void replace(FilterBypass fb, int offset, int length, String text,
+                                      javax.swing.text.AttributeSet attrs) throws BadLocationException {
+            StyledDocument doc = (StyledDocument) fb.getDocument();
+            String field = fieldAt(doc, offset);
+            if (length > 0 ? blocked(doc, offset, length) : headerAt(doc, offset) || field == null) {
+                Toolkit.getDefaultToolkit().beep();
+                return;
+            }
+            super.replace(fb, offset, length, text, attributesFor(field));
         }
     }
 
