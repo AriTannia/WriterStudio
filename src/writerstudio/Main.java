@@ -15,6 +15,10 @@ public final class Main {
     private Main() {}
 
     public static void main(String[] args) {
+        if (args.length > 0 && "--ai-test".equals(args[0])) {
+            System.exit(AiCli.run(args));
+            return;
+        }
         System.setProperty("apple.laf.useScreenMenuBar", "true");
         SwingUtilities.invokeLater(() -> {
             installLookAndFeel();

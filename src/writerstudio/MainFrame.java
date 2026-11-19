@@ -47,6 +47,7 @@ public class MainFrame extends JFrame {
     private enum Mode { EDITOR, SCRIVENINGS, CORKBOARD, OUTLINER }
 
     private final Project project;
+    private final AiService aiService = new AiService();
     private final BinderPanel binder;
     private final EditorPanel editor;
     private final ResearchEditorPanel researchEditor;
@@ -86,6 +87,7 @@ public class MainFrame extends JFrame {
         this.project = project;
 
         editor = new EditorPanel(project, this::updateStatus);
+        editor.setAi(aiService, this::createAiNote);
         researchEditor = new ResearchEditorPanel(project, this::openInEditor);
         cork = new CorkboardPanel(project, this::openInEditor, this::newCard);
         outliner = new OutlinerPanel(project, this::openInEditor);
@@ -247,6 +249,7 @@ public class MainFrame extends JFrame {
         bar.add(file);
         bar.add(edit);
         bar.add(view);
+        bar.add(buildAiMenu());
         return bar;
     }
 
@@ -254,6 +257,39 @@ public class MainFrame extends JFrame {
         JMenuItem menuItem = item(text, key, () -> setMode(mode));
         modeMenuItems.put(mode, menuItem);
         menu.add(menuItem);
+    }
+
+    private JMenu buildAiMenu() {
+        JMenu ai = new JMenu("AI");
+        ai.add(item("Dán API key\u2026", null, () -> AiKeyDialog.show(this, aiService)));
+        ai.add(item("Phong cách viết\u2026", null, () -> AiStyleDialog.show(this, aiService, project.getDir(),
+                editor.selectedText())));
+        ai.addSeparator();
+        ai.add(item("Hướng dẫn lệnh /assist và /chat", null, this::showAiHelp));
+        return ai;
+    }
+
+    private void showAiHelp() {
+        JOptionPane.showMessageDialog(this,
+                "Gõ lệnh trong editor rồi nhấn Enter:\n\n"
+                        + "/assist: yêu cầu của bạn\n"
+                        + "    AI viết tiếp / viết lại dựa trên đoạn văn phía trước.\n"
+                        + "    Kết quả hiện màu xanh: Tab = giữ (Yes), Esc = bỏ (No), Ctrl+R = thử lại.\n"
+                        + "    Để trống yêu cầu (/assist:) = viết tiếp tự nhiên.\n\n"
+                        + "/chat: câu hỏi của bạn\n"
+                        + "    AI trả lời và tạo một ghi chú con (nhãn Idea) dưới thẻ hiện tại.\n\n"
+                        + "Esc khi đang chờ = hủy. Menu AI \u2192 Phong cách viết để chỉnh giọng văn.",
+                "Lệnh AI", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /** Called by the editor when /chat: produced an answer: adds it as a child note of the current card. */
+    private Item createAiNote(Item parent, String title, String content) {
+        Item note = new Item(Item.Kind.TEXT, title);
+        note.setContent(content);
+        note.setLabel("Idea");
+        project.insert(note, parent, parent.getChildCount());
+        binder.expand(parent);
+        return note;
     }
 
     private static JMenuItem item(String text, KeyStroke accel, Runnable r) {
