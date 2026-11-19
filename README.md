@@ -74,6 +74,41 @@ Linux/macOS:
 ./build.sh
 ```
 
+## AI assistant (free API keys)
+
+Menu **AI → Dán API key…**: paste a key from Google AI Studio (Gemini), Groq or OpenRouter. The app detects the
+provider from the key, asks the provider for its model list, picks a suitable model and sends a short test message.
+Nothing else needs to be configured. (An **Advanced** section lets you choose the provider, API address and model by
+hand, e.g. for a local Ollama server.) The key is stored in your user preferences, never in the project folder.
+
+Type a command in the editor and press **Enter**:
+
+```text
+/assist: viết tiếp 3 câu, giọng buồn     AI writes text after the command (green).
+                                          Tab = Yes (keep, command removed), Esc = No (remove both),
+                                          Ctrl+R = try again. Yes is a single Ctrl+Z step.
+/assist:                                  empty instruction = continue naturally
+/chat: gợi ý 5 tên cho thị trấn biển     AI answer becomes a child note (label Idea) under the current card
+```
+
+The command may follow text on the same line (`... Đoạn 3 /assist: tiếp`). Esc while waiting cancels the request.
+While a result is shown the editor is read-only and the temporary text is never saved.
+
+Menu **AI → Phong cách viết…** (saved per project in `ai-style.properties`): describe the tone in plain words, tick
+options, move the sliders, or press *Để AI soạn cấu hình giúp* to let the AI write the system prompt and parameters.
+*Thử với đoạn mẫu* runs the current style on a sample paragraph so you can tune it before saving.
+
+Test the connection from a terminal (no window needed):
+
+```text
+java -jar WriterStudio.jar --ai-test                   uses the key saved in the app
+java -jar WriterStudio.jar --ai-test YOUR_KEY          tries a key without saving it
+java -jar WriterStudio.jar --ai-test --show-prompt     also prints the exact request /assist would send
+```
+
+Free tiers change often (limits, models, data-use terms); check the provider's current terms before sending
+unpublished text.
+
 ## Project format
 
 A project is an ordinary folder:

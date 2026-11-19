@@ -79,6 +79,7 @@ public class EditorPanel extends JPanel {
     private JToggleButton underlineToggle;
     private boolean updatingFormatControls;
     private final Timer flushTimer;
+    private final AiCommandController ai;
 
     private final SimpleAttributeSet body = new SimpleAttributeSet();
     private final SimpleAttributeSet separatorChars = new SimpleAttributeSet();
@@ -138,6 +139,7 @@ public class EditorPanel extends JPanel {
         saveNoticeTimer = new Timer(2600, e -> saveNotice.setText(" "));
         saveNoticeTimer.setRepeats(false);
 
+        ai = new AiCommandController(this, pane);
         JScrollPane editorScroll = new JScrollPane(pane);
         editorScroll.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(new Color(0xD6DBE3)),
@@ -147,6 +149,7 @@ public class EditorPanel extends JPanel {
         stack.add(emptyLabel, "empty");
         add(formatBar, BorderLayout.NORTH);
         add(stack, BorderLayout.CENTER);
+        add(ai.bar(), BorderLayout.SOUTH);
         showEmpty("Select a document in the Binder.");
     }
 
@@ -154,6 +157,7 @@ public class EditorPanel extends JPanel {
 
     public void showEmpty(String message) {
         flush();
+        ai.reset();
         sections = new ArrayList<>();
         emptyLabel.setText(message);
         setFormatBarEnabled(false);
@@ -162,6 +166,7 @@ public class EditorPanel extends JPanel {
 
     public void showFile(Item item, File file) {
         flush();
+        ai.reset();
         sections = new ArrayList<>();
         viewer.show(item, file);
         setFormatBarEnabled(false);
@@ -174,6 +179,7 @@ public class EditorPanel extends JPanel {
      */
     public void showSections(List<Item> items) {
         flush();
+        ai.reset();
         if (items.isEmpty()) {
             showEmpty("Nothing to show here yet.");
             return;
@@ -213,7 +219,7 @@ public class EditorPanel extends JPanel {
             @Override public void removeUpdate(DocumentEvent e) { flushTimer.restart(); }
             @Override public void changedUpdate(DocumentEvent e) { }
         });
-        if (headers) doc.setDocumentFilter(new SectionFilter());
+        doc.setDocumentFilter(new EditorFilter(headers ? new SectionFilter() : null));
         pane.setCaretPosition(Math.min(firstBody, doc.getLength()));
         cards.show(stack, "text");
         pane.requestFocusInWindow();
@@ -416,11 +422,22 @@ public class EditorPanel extends JPanel {
         try {
             StyledDocument doc = pane.getStyledDocument();
             String text = doc.getText(0, doc.getLength());
+            int[] ghost = ai.ghostRange();                       // temporary AI result: never saved
+            if (ghost != null && ghost[1] <= text.length()) text = text.substring(0, ghost[0]) + text.substring(ghost[1]);
             boolean changed = false;
             if (sections.size() == 1) {
                 changed = apply(sections.get(0), text);
             } else {
                 List<int[]> seps = separatorRanges(doc);
+                if (ghost != null) {
+                    int cut = ghost[1] - ghost[0];
+                    for (int[] r : seps) {
+                        for (int i = 0; i < 2; i++) {
+                            if (r[i] >= ghost[1]) r[i] -= cut;
+                            else if (r[i] > ghost[0]) r[i] = ghost[0];
+                        }
+                    }
+                }
                 if (seps.size() != sections.size()) return;     // should never happen
                 for (int k = 0; k < sections.size(); k++) {
                     int start = seps.get(k)[1];
@@ -452,11 +469,12 @@ public class EditorPanel extends JPanel {
         return out;
     }
 
-    private static boolean isSeparator(Element paragraph) {
+    static boolean isSeparator(Element paragraph) {
         return paragraph.getAttributes().containsAttribute(HDR, Boolean.TRUE);
     }
 
     public void undo() {
+        if (ai.isActive()) return;
         try {
             if (undo.canUndo()) undo.undo();
         } catch (CannotUndoException ignored) {
@@ -465,10 +483,92 @@ public class EditorPanel extends JPanel {
     }
 
     public void redo() {
+        if (ai.isActive()) return;
         try {
             if (undo.canRedo()) undo.redo();
         } catch (CannotRedoException ignored) {
             // nothing to redo
+        }
+    }
+
+    // ---- hooks used by the AI command controller ------------------------------------------------------
+
+    /** Connects the AI assistant (/assist: and /chat: commands typed in the editor). */
+    public void setAi(AiService service, AiCommandController.ChildCreator creator) {
+        ai.configure(service, creator);
+    }
+
+    Project project() { return project; }
+
+    AiCommandController aiController() { return ai; }
+
+    /** The text currently selected in the editor (may be null). */
+    public String selectedText() {
+        return pane.getSelectedText();
+    }
+
+    UndoManager undoManager() { return undo; }
+
+    SimpleAttributeSet attrsFor(Item item) {
+        return cardStyles.computeIfAbsent(item.getId(), k -> new EditorStyle()).attributes();
+    }
+
+    void restyleParagraphs() {
+        applyNovelParagraphSpacing(pane.getStyledDocument());
+    }
+
+    private int sectionIndexAt(int offset) {
+        if (sections.isEmpty()) return -1;
+        if (sections.size() == 1) return 0;
+        List<int[]> seps = separatorRanges(pane.getStyledDocument());
+        int found = -1;
+        for (int k = 0; k < seps.size() && k < sections.size(); k++) if (seps.get(k)[0] <= offset) found = k;
+        return found;
+    }
+
+    /** The document (section) that contains the given offset, or null. */
+    Item sectionItemAt(int offset) {
+        int k = sectionIndexAt(offset);
+        return k < 0 ? null : sections.get(k);
+    }
+
+    /** [start, end) of the text of the section that contains the offset. */
+    int[] sectionBody(int offset) {
+        StyledDocument doc = pane.getStyledDocument();
+        int k = sectionIndexAt(offset);
+        if (sections.size() <= 1 || k < 0) return new int[] {0, doc.getLength()};
+        List<int[]> seps = separatorRanges(doc);
+        int start = seps.get(k)[1];
+        int end = k + 1 < seps.size() ? seps.get(k + 1)[0] - 1 : doc.getLength();
+        return new int[] {start, Math.max(start, end)};
+    }
+
+    /** Wraps the document filter so the AI controller can edit freely while still protecting separators otherwise. */
+    private class EditorFilter extends DocumentFilter {
+        private final DocumentFilter inner;
+
+        EditorFilter(DocumentFilter inner) { this.inner = inner; }
+
+        private DocumentFilter target() { return inner == null || ai.isApplying() ? null : inner; }
+
+        @Override public void insertString(FilterBypass fb, int offset, String string, AttributeSet attr)
+                throws BadLocationException {
+            DocumentFilter t = target();
+            if (t == null) fb.insertString(offset, string, attr);
+            else t.insertString(fb, offset, string, attr);
+        }
+
+        @Override public void remove(FilterBypass fb, int offset, int length) throws BadLocationException {
+            DocumentFilter t = target();
+            if (t == null) fb.remove(offset, length);
+            else t.remove(fb, offset, length);
+        }
+
+        @Override public void replace(FilterBypass fb, int offset, int length, String text, AttributeSet attrs)
+                throws BadLocationException {
+            DocumentFilter t = target();
+            if (t == null) fb.replace(offset, length, text, attrs);
+            else t.replace(fb, offset, length, text, attrs);
         }
     }
 
