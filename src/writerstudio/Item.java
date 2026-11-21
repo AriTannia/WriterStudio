@@ -57,6 +57,7 @@ public class Item extends DefaultMutableTreeNode {
     private final List<ResearchImage> images = new ArrayList<>();
     private String primaryImageFile = "";
     private final Map<String, String> fields = new LinkedHashMap<>();
+    private final Map<String, String> threeActFields = new LinkedHashMap<>();
     private String file = "";           // relative path inside the project (FILE items only)
     private boolean contentDirty = true;
     private boolean wordsDirty = true;
@@ -144,6 +145,11 @@ public class Item extends DefaultMutableTreeNode {
     public void setFields(Map<String, String> values) {
         fields.clear();
         if (values != null) fields.putAll(values);
+    }
+    public Map<String, String> getThreeActFields() { return new LinkedHashMap<>(threeActFields); }
+    public void setThreeActFields(Map<String, String> values) {
+        threeActFields.clear();
+        if (values != null) threeActFields.putAll(values);
     }
 
     /** Which top-level zone (Draft / Research / Trash) this item lives in. */

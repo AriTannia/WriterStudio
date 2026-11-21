@@ -310,8 +310,10 @@ public class InspectorPanel extends JPanel {
         chooser.setFileFilter(new FileNameExtensionFilter("Images", "png", "jpg", "jpeg", "gif", "bmp", "webp"));
         if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
         try {
+            java.awt.image.BufferedImage cropped = ImageCropDialog.show(this, chooser.getSelectedFile());
+            if (cropped == null) return;
             String caption = JOptionPane.showInputDialog(this, "Image caption:", chooser.getSelectedFile().getName());
-            String storedPath = project.importResearchImage(chooser.getSelectedFile());
+            String storedPath = project.importResearchImage(cropped);
             item.addImage(new ResearchImage(storedPath, caption));
             project.markDirty();
             refreshResearchDetails(item);
@@ -343,22 +345,31 @@ public class InspectorPanel extends JPanel {
     private void addRelationship() {
         if (item == null) return;
         List<Item> candidates = new ArrayList<>();
+        Item chartFolder = item.getParent() instanceof Item
+                && ((Item) item.getParent()).isRelationshipFolder() ? (Item) item.getParent() : null;
         for (Item candidate : project.root().subtree()) {
             if (candidate != item && candidate.getKind() == Item.Kind.TEXT
-                    && candidate.getResearchType() == Item.ResearchType.CHARACTER) candidates.add(candidate);
+                    && candidate.getResearchType() == Item.ResearchType.CHARACTER
+                    && (chartFolder == null || candidate.getParent() == chartFolder)) candidates.add(candidate);
         }
         JComboBox<Item> target = new JComboBox<>(candidates.toArray(new Item[0]));
-        JTextField type = new JTextField("Connected");
+        JTextField name = new JTextField("Connected");
+        JComboBox<RelationshipLink.ArrowDirection> direction =
+                new JComboBox<>(RelationshipLink.ArrowDirection.values());
         JPanel form = new JPanel(new java.awt.GridLayout(0, 1, 4, 4));
         form.add(new JLabel("Connect to"));
         form.add(target);
-        form.add(new JLabel("Type"));
-        form.add(type);
+        form.add(new JLabel("Relationship name"));
+        form.add(name);
+        form.add(new JLabel("Type (arrow direction)"));
+        form.add(direction);
         if (JOptionPane.showConfirmDialog(this, form, "Add relationship",
                 JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) return;
         Item other = (Item) target.getSelectedItem();
         if (other == null) return;
-        project.addRelationship(new RelationshipLink(item.getId(), other.getId(), type.getText(), "", ""));
+        RelationshipLink link = new RelationshipLink(item.getId(), other.getId(), name.getText(), "", "");
+        link.setArrowDirection((RelationshipLink.ArrowDirection) direction.getSelectedItem());
+        project.addRelationship(link);
         refreshCharacterDetails(item);
     }
 

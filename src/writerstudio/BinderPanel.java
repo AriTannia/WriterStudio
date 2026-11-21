@@ -293,7 +293,7 @@ public class BinderPanel extends JPanel {
     private static String researchTemplate(Item.ResearchType type) {
         switch (type) {
             case CHARACTER:
-                return "Overview\n\nPersonality\n\nGoals\n\nBackstory\n\nRelationships\n\nNotes\n";
+                return "";
             case LOCATION:
                 return "Description\n\nAtmosphere\n\nImportant details\n\nAppears in\n\nNotes\n";
             case ORGANIZATION:

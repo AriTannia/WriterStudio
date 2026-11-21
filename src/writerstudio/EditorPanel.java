@@ -63,7 +63,6 @@ public class EditorPanel extends JPanel {
     static final Object HDR = "writerstudio.separator";
     private static final Object STRUCTURE_HEADER = "writerstudio.structure.header";
     private static final Object STRUCTURE_FIELD = "writerstudio.structure.field";
-    private static final String SUMMARY_FIELD = "writerstudio.structure.summary";
 
     private final Project project;
     private final Runnable onFlushed;
@@ -209,12 +208,8 @@ public class EditorPanel extends JPanel {
         setFormatBarEnabled(true);
         pane.setEditable(true);
         DefaultStyledDocument doc = new DefaultStyledDocument();
-        int summaryStart;
         try {
             appendStructureLine(doc, item.getTitle(), structureTitle, true);
-            appendStructureLine(doc, "Summary", structureHeading, true);
-            summaryStart = doc.getLength();
-            appendStructureValue(doc, SUMMARY_FIELD, item.getContent(), true);
             appendStructureGroup(doc, "ACT I - SETUP  0-25%", 0, 5, item);
             appendStructureGroup(doc, "ACT II - CONFRONTATION  25-75%", 6, 12, item);
             appendStructureGroup(doc, "ACT III - RESOLUTION  80-100%", 13, 14, item);
@@ -231,7 +226,7 @@ public class EditorPanel extends JPanel {
             @Override public void changedUpdate(DocumentEvent event) { }
         });
         doc.setDocumentFilter(new EditorFilter(new StructureFilter()));
-        pane.setCaretPosition(Math.min(summaryStart, doc.getLength()));
+        pane.setCaretPosition(0);
         cards.show(stack, "text");
         pane.requestFocusInWindow();
         updateFormatControls();
@@ -240,7 +235,7 @@ public class EditorPanel extends JPanel {
     private void appendStructureGroup(DefaultStyledDocument doc, String title, int first, int last, Item item)
             throws BadLocationException {
         appendStructureLine(doc, title, structureHeading, true);
-        Map<String, String> fields = item.getFields();
+        Map<String, String> fields = item.getThreeActFields();
         for (int i = first; i <= last; i++) {
             ResearchEditorPanel.ThreeActField beat = ResearchEditorPanel.THREE_ACT_FIELDS[i];
             appendStructureLine(doc, beat.name + (beat.range.isEmpty() ? "" : "  " + beat.range),
@@ -564,7 +559,7 @@ public class EditorPanel extends JPanel {
     private void flushStructure() {
         if (structureItem == null) return;
         StyledDocument doc = pane.getStyledDocument();
-        Map<String, String> fields = structureItem.getFields();
+        Map<String, String> fields = structureItem.getThreeActFields();
         boolean fieldsChanged = false;
         boolean changed = false;
         try {
@@ -587,12 +582,7 @@ public class EditorPanel extends JPanel {
             for (Map.Entry<String, StringBuilder> entry : values.entrySet()) {
                 String key = entry.getKey();
                 String value = entry.getValue().toString();
-                if (SUMMARY_FIELD.equals(key)) {
-                    if (!value.equals(structureItem.getContent())) {
-                        structureItem.setContent(value);
-                        changed = true;
-                    }
-                } else if (!value.equals(fields.get(key))) {
+                if (!value.equals(fields.get(key))) {
                     fields.put(key, value);
                     fieldsChanged = true;
                 }
@@ -601,7 +591,7 @@ public class EditorPanel extends JPanel {
             throw new IllegalStateException(e);
         }
         if (fieldsChanged) {
-            structureItem.setFields(fields);
+            structureItem.setThreeActFields(fields);
             changed = true;
         }
         if (changed) {

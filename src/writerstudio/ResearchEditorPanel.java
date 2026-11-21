@@ -19,6 +19,7 @@ import javax.swing.JScrollPane;
 import javax.swing.Scrollable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.Timer;
 import javax.swing.SwingUtilities;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -26,7 +27,10 @@ import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
 import java.awt.BorderLayout;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
+import java.awt.FontMetrics;
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -67,14 +71,20 @@ public final class ResearchEditorPanel extends JPanel {
     private final JTree linksTree = new JTree(new DefaultMutableTreeNode("Linked Cards"));
     private final JPanel relationshipRows = new JPanel();
     private final JPanel fieldRows = new JPanel();
+    private final List<FieldEditorBinding> fieldEditors = new ArrayList<>();
+    private final Map<String, Boolean> fieldExpansionStates = new LinkedHashMap<>();
+    private final JLabel saveNotice = new JLabel(" ");
+    private final Timer saveNoticeTimer = new Timer(2600, event -> saveNotice.setText(" "));
     private Item item;
     private boolean updating;
     private final Consumer<Item> openItem;
+    private final Runnable onResearchTypeChanged;
 
-    public ResearchEditorPanel(Project project, Consumer<Item> openItem) {
+    public ResearchEditorPanel(Project project, Consumer<Item> openItem, Runnable onResearchTypeChanged) {
         super(new BorderLayout());
         this.project = project;
         this.openItem = openItem;
+        this.onResearchTypeChanged = onResearchTypeChanged;
         form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
         form.setBorder(BorderFactory.createEmptyBorder(18, 22, 30, 22));
 
@@ -96,6 +106,12 @@ public final class ResearchEditorPanel extends JPanel {
         JScrollPane scroll = new JScrollPane(form);
         scroll.setBorder(BorderFactory.createEmptyBorder());
         add(scroll, BorderLayout.CENTER);
+        saveNotice.setHorizontalAlignment(JLabel.RIGHT);
+        saveNotice.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 16));
+        saveNotice.setFont(saveNotice.getFont().deriveFont(java.awt.Font.BOLD, 12f));
+        saveNotice.setForeground(new java.awt.Color(0x197A45));
+        saveNoticeTimer.setRepeats(false);
+        add(saveNotice, BorderLayout.SOUTH);
 
         title.addActionListener(e -> saveBasics());
         title.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
@@ -110,6 +126,20 @@ public final class ResearchEditorPanel extends JPanel {
             public void changedUpdate(javax.swing.event.DocumentEvent e) { saveContent(); }
         });
         characterClass.addActionListener(e -> saveCharacter());
+    }
+
+    public void showSaveNotice(String message) {
+        saveNotice.setText(message);
+        saveNotice.setForeground(message.toLowerCase().contains("failed")
+                ? new java.awt.Color(0xB3261E) : new java.awt.Color(0x197A45));
+        saveNotice.setEnabled(true);
+        if ("Saving…".equals(message)) saveNoticeTimer.stop();
+        else saveNoticeTimer.restart();
+    }
+
+    void keepSaveNoticeEnabled() {
+        saveNotice.setEnabled(true);
+        saveNotice.setForeground(new java.awt.Color(0x197A45));
     }
 
     private void addField(String label, Component component) {
@@ -205,14 +235,18 @@ public final class ResearchEditorPanel extends JPanel {
     public void show(Item item) {
         updating = true;
         try {
+            for (String fieldName : item.getFields().keySet()) {
+                fieldExpansionStates.put(fieldStateKey(item, fieldName), false);
+            }
             this.item = item;
             title.setText(item.getTitle());
             type.setSelectedItem(item.getResearchType());
             content.setText(item.getContent());
-            setContentLabel(item.getResearchType());
+            boolean threeAct = item.getResearchType() == Item.ResearchType.THREE_ACT_STRUCTURE;
+            contentSection.setVisible(!threeAct);
             characterSection.setVisible(item.getResearchType() == Item.ResearchType.CHARACTER);
-            threeActSection.setVisible(item.getResearchType() == Item.ResearchType.THREE_ACT_STRUCTURE);
-            setResearchSectionsVisible(item.getResearchType() != Item.ResearchType.THREE_ACT_STRUCTURE);
+            threeActSection.setVisible(threeAct);
+            setResearchSectionsVisible(!threeAct);
             primaryImageButton.setVisible(item.getResearchType() == Item.ResearchType.CHARACTER);
             refreshLists();
         } finally {
@@ -222,23 +256,30 @@ public final class ResearchEditorPanel extends JPanel {
         form.repaint();
     }
 
+    /** Commit all currently displayed research controls into their owning item before save or navigation. */
+    public void flush() {
+        for (FieldEditorBinding binding : new ArrayList<>(fieldEditors)) {
+            saveField(binding);
+            saveFieldValue(binding);
+        }
+    }
+
     private void saveBasics() {
         if (updating || item == null) return;
+        Item.ResearchType previousType = item.getResearchType();
         String value = title.getText().trim();
         if (!value.isEmpty() && !value.equals(item.getTitle())) item.setTitle(value);
         item.setResearchType((Item.ResearchType) type.getSelectedItem());
-        setContentLabel(item.getResearchType());
+        boolean threeAct = item.getResearchType() == Item.ResearchType.THREE_ACT_STRUCTURE;
+        contentSection.setVisible(!threeAct);
         characterSection.setVisible(item.getResearchType() == Item.ResearchType.CHARACTER);
-        threeActSection.setVisible(item.getResearchType() == Item.ResearchType.THREE_ACT_STRUCTURE);
-        setResearchSectionsVisible(item.getResearchType() != Item.ResearchType.THREE_ACT_STRUCTURE);
+        threeActSection.setVisible(threeAct);
+        setResearchSectionsVisible(!threeAct);
         primaryImageButton.setVisible(item.getResearchType() == Item.ResearchType.CHARACTER);
         if (item.getResearchType() == Item.ResearchType.THREE_ACT_STRUCTURE) refreshThreeActFields();
         project.changedQuietly(item);
+        if (previousType != item.getResearchType()) onResearchTypeChanged.run();
         form.revalidate();
-    }
-
-    private void setContentLabel(Item.ResearchType researchType) {
-        contentSection.setTitle(researchType == Item.ResearchType.THREE_ACT_STRUCTURE ? "Summary" : "Content");
     }
 
     private void setResearchSectionsVisible(boolean visible) {
@@ -248,7 +289,7 @@ public final class ResearchEditorPanel extends JPanel {
     }
 
     private void saveContent() {
-        if (updating || item == null) return;
+        if (updating || item == null || item.getResearchType() == Item.ResearchType.THREE_ACT_STRUCTURE) return;
         item.setContent(content.getText());
         project.markDirty();
     }
@@ -542,7 +583,10 @@ public final class ResearchEditorPanel extends JPanel {
             JPanel row = new JPanel(new BorderLayout(8, 0));
             row.setAlignmentX(Component.LEFT_ALIGNMENT);
             row.add(new JLabel(other.getTitle() + "  \u00b7  " + link.getType()), BorderLayout.CENTER);
-            row.add(iconButton("Delete relationship", Icons.delete(), () -> deleteRelationship(link)), BorderLayout.WEST);
+            JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 3, 0));
+            actions.add(iconButton("Edit relationship", Icons.edit(), () -> editRelationship(link)));
+            actions.add(iconButton("Delete relationship", Icons.delete(), () -> deleteRelationship(link)));
+            row.add(actions, BorderLayout.EAST);
             relationshipRows.add(row);
         }
         relationshipRows.revalidate();
@@ -552,13 +596,34 @@ public final class ResearchEditorPanel extends JPanel {
     private void deleteRelationship(RelationshipLink link) {
         if (JOptionPane.showConfirmDialog(this, "Delete this relationship?",
                 "Delete relationship", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return;
-        project.removeRelationship(link.getFromId(), link.getToId());
+        project.removeRelationship(link);
+        refreshRelationships();
+    }
+
+    private void editRelationship(RelationshipLink link) {
+        JTextField name = new JTextField(link.getType());
+        JComboBox<RelationshipLink.ArrowDirection> direction =
+                new JComboBox<>(RelationshipLink.ArrowDirection.values());
+        direction.setSelectedItem(link.getArrowDirection());
+        JPanel form = new JPanel(new java.awt.GridLayout(0, 1, 4, 4));
+        form.add(new JLabel("Relationship name"));
+        form.add(name);
+        form.add(new JLabel("Type (arrow direction)"));
+        form.add(direction);
+        if (JOptionPane.showConfirmDialog(this, form, "Edit relationship",
+                JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) return;
+        link.setType(name.getText().trim());
+        link.setArrowDirection((RelationshipLink.ArrowDirection) direction.getSelectedItem());
+        project.markDirty();
         refreshRelationships();
     }
 
     private void refreshFields() {
         fieldRows.removeAll();
-        for (Map.Entry<String, String> field : item.getFields().entrySet()) addFieldRow(field.getKey(), field.getValue());
+        fieldEditors.clear();
+        for (Map.Entry<String, String> field : item.getFields().entrySet()) {
+            addFieldRow(item, field.getKey(), field.getValue());
+        }
         fieldRows.revalidate();
         fieldRows.repaint();
     }
@@ -599,7 +664,7 @@ public final class ResearchEditorPanel extends JPanel {
     private void refreshThreeActFields() {
         threeActSection.removeAllContent();
         if (item == null || item.getResearchType() != Item.ResearchType.THREE_ACT_STRUCTURE) return;
-        Map<String, String> values = item.getFields();
+        Map<String, String> values = item.getThreeActFields();
         boolean changed = false;
         for (ThreeActField beat : THREE_ACT_FIELDS) {
             if (!values.containsKey(beat.name)) {
@@ -608,7 +673,7 @@ public final class ResearchEditorPanel extends JPanel {
             }
         }
         if (changed) {
-            item.setFields(values);
+            item.setThreeActFields(values);
             project.markDirty();
         }
 
@@ -626,7 +691,7 @@ public final class ResearchEditorPanel extends JPanel {
     }
 
     private void addThreeActField(CollapsibleSection parent, ThreeActField beat) {
-        JTextArea value = new JTextArea(item.getFields().get(beat.name), 4, 60);
+        JTextArea value = new JTextArea(item.getThreeActFields().get(beat.name), 4, 60);
         value.setLineWrap(true);
         value.setWrapStyleWord(true);
         value.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -649,42 +714,195 @@ public final class ResearchEditorPanel extends JPanel {
 
     private void saveThreeActField(String name, JTextArea value) {
         if (updating || item == null || item.getResearchType() != Item.ResearchType.THREE_ACT_STRUCTURE) return;
-        Map<String, String> fields = item.getFields();
+        Map<String, String> fields = item.getThreeActFields();
         fields.put(name, value.getText());
-        item.setFields(fields);
+        item.setThreeActFields(fields);
         project.markDirty();
     }
 
-    private void addFieldRow(String name, String value) {
-        JPanel row = new JPanel(new BorderLayout(8, 4));
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+    private void addFieldRow(Item owner, String name, String value) {
+        CollapsibleSection fieldSection = new CollapsibleSection(name);
+        fieldSection.setBorder(BorderFactory.createLineBorder(new java.awt.Color(0xD6C9B0)));
+        String initialStateKey = fieldStateKey(owner, name);
+        fieldSection.setExpanded(fieldExpansionStates.getOrDefault(initialStateKey, false));
         JTextField fieldName = new JTextField(name);
+        fieldName.setToolTipText("Field name");
         JTextArea fieldValue = new JTextArea(value, 4, 40);
         String[] storedName = {name};
+        FieldEditorBinding binding = new FieldEditorBinding(owner, storedName, fieldName, fieldValue, fieldSection);
+        fieldEditors.add(binding);
+        fieldSection.setExpansionListener(expanded -> fieldExpansionStates.put(
+                fieldStateKey(owner, binding.storedName[0]), expanded));
         fieldValue.setLineWrap(true);
         fieldValue.setWrapStyleWord(true);
+        fieldValue.setBorder(BorderFactory.createEmptyBorder(5, 7, 5, 7));
+        fieldValue.setMinimumSize(new Dimension(0, 76));
         JButton remove = iconButton("Delete optional field", Icons.delete(), () -> {
-            Map<String, String> fields = item.getFields();
+            Map<String, String> fields = owner.getFields();
             fields.remove(storedName[0]);
-            item.setFields(fields);
+            owner.setFields(fields);
+            fieldExpansionStates.remove(fieldStateKey(owner, storedName[0]));
             project.markDirty();
-            refreshFields();
+            if (item == owner) refreshFields();
         });
-        fieldName.addActionListener(event -> saveField(storedName, fieldName, fieldValue));
+        remove.setMargin(new java.awt.Insets(4, 6, 4, 6));
+        JPanel nameRow = new JPanel(new BorderLayout(8, 0));
+        nameRow.setOpaque(false);
+        nameRow.add(new JLabel("Name"), BorderLayout.WEST);
+        nameRow.add(fieldName, BorderLayout.CENTER);
+        nameRow.add(remove, BorderLayout.EAST);
+        JPanel valuePanel = new JPanel(new BorderLayout(0, 4));
+        valuePanel.setOpaque(false);
+        valuePanel.add(new JLabel("Value"), BorderLayout.NORTH);
+        JScrollPane valueScroll = new JScrollPane(fieldValue,
+                JScrollPane.VERTICAL_SCROLLBAR_ALWAYS, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        valueScroll.setBorder(BorderFactory.createLineBorder(new java.awt.Color(0xC8BFAF)));
+        valueScroll.setPreferredSize(new Dimension(680, 120));
+        valueScroll.setMinimumSize(new Dimension(0, 100));
+        valueScroll.setWheelScrollingEnabled(true);
+        valueScroll.getVerticalScrollBar().setUnitIncrement(18);
+        valuePanel.add(valueScroll, BorderLayout.CENTER);
+        JPanel resizeRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
+        resizeRow.setOpaque(false);
+        JLabel resizeGrip = new JLabel("\u25e2");
+        resizeGrip.setForeground(new java.awt.Color(0x7D756A));
+        resizeGrip.setHorizontalAlignment(JLabel.CENTER);
+        resizeGrip.setPreferredSize(new Dimension(20, 16));
+        resizeGrip.setCursor(Cursor.getPredefinedCursor(Cursor.SE_RESIZE_CURSOR));
+        resizeGrip.setToolTipText("Drag to resize this field");
+        resizeRow.add(resizeGrip);
+        valuePanel.add(resizeRow, BorderLayout.SOUTH);
+        final Point[] resizeStartPoint = {null};
+        final Dimension[] resizeStartSize = {null};
+        updateFieldValueSize(fieldValue, valueScroll);
+        valueScroll.getViewport().addComponentListener(new ComponentAdapter() {
+            @Override public void componentResized(ComponentEvent event) {
+                updateFieldValueSize(fieldValue, valueScroll);
+            }
+        });
+        resizeGrip.addMouseListener(new MouseAdapter() {
+            @Override public void mousePressed(MouseEvent event) {
+                resizeStartPoint[0] = event.getLocationOnScreen();
+                resizeStartSize[0] = valueScroll.getPreferredSize();
+            }
+
+            @Override public void mouseReleased(MouseEvent event) {
+                resizeStartPoint[0] = null;
+                resizeStartSize[0] = null;
+            }
+        });
+        resizeGrip.addMouseMotionListener(new MouseAdapter() {
+            @Override public void mouseDragged(MouseEvent event) {
+                if (resizeStartPoint[0] == null || resizeStartSize[0] == null) return;
+                Point current = event.getLocationOnScreen();
+                int height = Math.max(100, Math.min(520,
+                        resizeStartSize[0].height + current.y - resizeStartPoint[0].y));
+                valueScroll.setPreferredSize(new Dimension(resizeStartSize[0].width, height));
+                valuePanel.revalidate();
+                fieldSection.revalidate();
+                fieldRows.revalidate();
+                form.revalidate();
+            }
+        });
+        fieldSection.addContent(nameRow);
+        fieldSection.addContent(valuePanel);
+
+        fieldName.addActionListener(event -> saveField(binding));
         fieldName.addFocusListener(new FocusAdapter() {
-            @Override public void focusLost(FocusEvent event) { saveField(storedName, fieldName, fieldValue); }
+            @Override public void focusLost(FocusEvent event) { saveField(binding); }
+        });
+        fieldName.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            private void updateTitle() {
+                String title = fieldName.getText().trim();
+                fieldSection.setTitle(title.isEmpty() ? "Untitled field" : title);
+            }
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { updateTitle(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { updateTitle(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { updateTitle(); }
         });
         fieldValue.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            public void insertUpdate(javax.swing.event.DocumentEvent e) { saveFieldValue(storedName, fieldValue); }
-            public void removeUpdate(javax.swing.event.DocumentEvent e) { saveFieldValue(storedName, fieldValue); }
-            public void changedUpdate(javax.swing.event.DocumentEvent e) { saveFieldValue(storedName, fieldValue); }
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                updateFieldValueSize(fieldValue, valueScroll);
+                saveFieldValue(binding);
+            }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                updateFieldValueSize(fieldValue, valueScroll);
+                saveFieldValue(binding);
+            }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                updateFieldValueSize(fieldValue, valueScroll);
+                saveFieldValue(binding);
+            }
         });
-        JPanel valuePanel = new JPanel(new BorderLayout(4, 2));
-        valuePanel.add(fieldName, BorderLayout.NORTH);
-        valuePanel.add(new JScrollPane(fieldValue), BorderLayout.CENTER);
-        row.add(valuePanel, BorderLayout.CENTER);
-        row.add(remove, BorderLayout.EAST);
-        fieldRows.add(row);
+        fieldRows.add(fieldSection);
+        fieldRows.add(Box.createVerticalStrut(8));
+    }
+
+    private void updateFieldValueSize(JTextArea textArea, JScrollPane scroll) {
+        int viewWidth = scroll.getViewport().getWidth();
+        if (viewWidth <= 0) viewWidth = Math.max(320,
+                scroll.getPreferredSize().width - scroll.getVerticalScrollBar().getPreferredSize().width - 4);
+        java.awt.Insets insets = textArea.getInsets();
+        int lineWidth = Math.max(80, viewWidth - insets.left - insets.right - 4);
+        FontMetrics metrics = textArea.getFontMetrics(textArea.getFont());
+        int visualLines = 0;
+        for (String line : textArea.getText().split("\\n", -1)) {
+            visualLines += wrappedLineCount(line, metrics, lineWidth);
+        }
+        visualLines = Math.max(4, Math.min(20000, visualLines));
+        int height = visualLines * metrics.getHeight() + insets.top + insets.bottom;
+        Dimension preferred = new Dimension(viewWidth, height);
+        if (!preferred.equals(textArea.getPreferredSize())) {
+            textArea.setPreferredSize(preferred);
+            textArea.revalidate();
+            scroll.revalidate();
+        }
+    }
+
+    private int wrappedLineCount(String text, FontMetrics metrics, int maxWidth) {
+        if (text.isEmpty()) return 1;
+        int rows = 1;
+        int currentWidth = 0;
+        int spaceWidth = metrics.stringWidth(" ");
+        for (String word : text.split("\\s+")) {
+            int wordWidth = metrics.stringWidth(word);
+            if (currentWidth > 0 && currentWidth + spaceWidth + wordWidth <= maxWidth) {
+                currentWidth += spaceWidth + wordWidth;
+                continue;
+            }
+            if (currentWidth > 0) {
+                rows++;
+                currentWidth = 0;
+            }
+            if (wordWidth <= maxWidth) {
+                currentWidth = wordWidth;
+            } else {
+                rows += wordWidth / maxWidth;
+                currentWidth = wordWidth % maxWidth;
+                if (currentWidth == 0) {
+                    rows--;
+                    currentWidth = maxWidth;
+                }
+            }
+        }
+        return rows;
+    }
+
+    private static final class FieldEditorBinding {
+        final Item owner;
+        final String[] storedName;
+        final JTextField fieldName;
+        final JTextArea fieldValue;
+        final CollapsibleSection section;
+
+        FieldEditorBinding(Item owner, String[] storedName, JTextField fieldName, JTextArea fieldValue,
+                           CollapsibleSection section) {
+            this.owner = owner;
+            this.storedName = storedName;
+            this.fieldName = fieldName;
+            this.fieldValue = fieldValue;
+            this.section = section;
+        }
     }
 
     static final class ThreeActField {
@@ -711,33 +929,44 @@ public final class ResearchEditorPanel extends JPanel {
         @Override public boolean getScrollableTracksViewportHeight() { return false; }
     }
 
-    private void saveField(String[] storedName, JTextField fieldName, JTextArea fieldValue) {
-        if (updating || item == null) return;
-        Map<String, String> fields = item.getFields();
-        String name = fieldName.getText().trim();
+    private void saveField(FieldEditorBinding binding) {
+        if (updating || binding.owner == null) return;
+        Map<String, String> fields = binding.owner.getFields();
+        String name = binding.fieldName.getText().trim();
         if (name.isEmpty()) {
-            fieldName.setText(storedName[0]);
+            binding.fieldName.setText(binding.storedName[0]);
             return;
         }
-        if (!name.equals(storedName[0]) && fields.containsKey(name)) {
+        if (!name.equals(binding.storedName[0]) && fields.containsKey(name)) {
             JOptionPane.showMessageDialog(this, "A field with that name already exists.",
                     "Rename field", JOptionPane.WARNING_MESSAGE);
-            fieldName.setText(storedName[0]);
+            binding.fieldName.setText(binding.storedName[0]);
             return;
         }
-        fields.remove(storedName[0]);
-        fields.put(name, fieldValue.getText());
-        storedName[0] = name;
-        item.setFields(fields);
+        if (name.equals(binding.storedName[0])
+                && java.util.Objects.equals(fields.get(name), binding.fieldValue.getText())) return;
+        String oldName = binding.storedName[0];
+        boolean wasExpanded = binding.section.isExpanded();
+        fields.remove(oldName);
+        fields.put(name, binding.fieldValue.getText());
+        fieldExpansionStates.remove(fieldStateKey(binding.owner, oldName));
+        binding.storedName[0] = name;
+        fieldExpansionStates.put(fieldStateKey(binding.owner, name), wasExpanded);
+        binding.owner.setFields(fields);
         project.markDirty();
     }
 
-    private void saveFieldValue(String[] storedName, JTextArea fieldValue) {
-        if (updating || item == null || storedName[0].isEmpty()) return;
-        Map<String, String> fields = item.getFields();
-        fields.put(storedName[0], fieldValue.getText());
-        item.setFields(fields);
+    private void saveFieldValue(FieldEditorBinding binding) {
+        if (updating || binding.owner == null || binding.storedName[0].isEmpty()) return;
+        Map<String, String> fields = binding.owner.getFields();
+        if (java.util.Objects.equals(fields.get(binding.storedName[0]), binding.fieldValue.getText())) return;
+        fields.put(binding.storedName[0], binding.fieldValue.getText());
+        binding.owner.setFields(fields);
         project.markDirty();
+    }
+
+    private String fieldStateKey(Item owner, String fieldName) {
+        return owner.getId() + "\u0000" + fieldName;
     }
 
     private static final class CollapsibleSection extends JPanel {
@@ -745,6 +974,7 @@ public final class ResearchEditorPanel extends JPanel {
         private final JButton toggle;
         private String title;
         private boolean expanded = true;
+        private java.util.function.Consumer<Boolean> expansionListener;
 
         CollapsibleSection(String title) {
             this(title, true);
@@ -759,10 +989,8 @@ public final class ResearchEditorPanel extends JPanel {
             toggle.setBorder(BorderFactory.createEmptyBorder(7, 8, 7, 8));
             toggle.setFocusable(false);
             toggle.addActionListener(e -> {
-                expanded = !expanded;
-                body.setVisible(expanded);
-                toggle.setText((expanded ? "\u25bc  " : "\u25b6  ") + this.title);
-                revalidate();
+                setExpanded(!expanded);
+                if (expansionListener != null) expansionListener.accept(expanded);
             });
             body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
             body.setBorder(collapsible
@@ -777,6 +1005,19 @@ public final class ResearchEditorPanel extends JPanel {
         void setTitle(String value) {
             title = value;
             toggle.setText((expanded ? "\u25bc  " : "\u25b6  ") + title);
+        }
+
+        void setExpanded(boolean value) {
+            expanded = value;
+            body.setVisible(expanded);
+            toggle.setText((expanded ? "\u25bc  " : "\u25b6  ") + title);
+            revalidate();
+        }
+
+        boolean isExpanded() { return expanded; }
+
+        void setExpansionListener(java.util.function.Consumer<Boolean> listener) {
+            expansionListener = listener;
         }
 
         void addContent(Component component) {
@@ -795,9 +1036,11 @@ public final class ResearchEditorPanel extends JPanel {
         chooser.setFileFilter(new FileNameExtensionFilter("Images", "png", "jpg", "jpeg", "gif", "bmp", "webp"));
         if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
         try {
+            java.awt.image.BufferedImage cropped = ImageCropDialog.show(this, chooser.getSelectedFile());
+            if (cropped == null) return;
             String caption = JOptionPane.showInputDialog(this, "Image caption:",
                     chooser.getSelectedFile().getName());
-            String storedPath = project.importResearchImage(chooser.getSelectedFile());
+            String storedPath = project.importResearchImage(cropped);
             item.addImage(new ResearchImage(storedPath, caption));
             project.markDirty();
             refreshLists();
@@ -927,23 +1170,32 @@ public final class ResearchEditorPanel extends JPanel {
 
     private void addRelationship() {
         List<Item> candidates = new ArrayList<>();
+        Item chartFolder = item.getParent() instanceof Item
+                && ((Item) item.getParent()).isRelationshipFolder() ? (Item) item.getParent() : null;
         for (Item candidate : project.root().subtree()) {
             if (candidate != item && candidate.getKind() == Item.Kind.TEXT
-                    && candidate.getResearchType() == Item.ResearchType.CHARACTER) candidates.add(candidate);
+                    && candidate.getResearchType() == Item.ResearchType.CHARACTER
+                    && (chartFolder == null || candidate.getParent() == chartFolder)) candidates.add(candidate);
         }
         JComboBox<Item> target = new JComboBox<>(candidates.toArray(new Item[0]));
-        JTextField relationshipType = new JTextField("Connected");
+        JTextField relationshipName = new JTextField("Connected");
+        JComboBox<RelationshipLink.ArrowDirection> direction =
+                new JComboBox<>(RelationshipLink.ArrowDirection.values());
         JPanel panel = new JPanel(new java.awt.GridLayout(0, 1, 4, 4));
         panel.add(new JLabel("Connect to"));
         panel.add(target);
-        panel.add(new JLabel("Type"));
-        panel.add(relationshipType);
+        panel.add(new JLabel("Relationship name"));
+        panel.add(relationshipName);
+        panel.add(new JLabel("Type (arrow direction)"));
+        panel.add(direction);
         if (JOptionPane.showConfirmDialog(this, panel, "Add relationship",
                 JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) return;
         Item other = (Item) target.getSelectedItem();
         if (other == null) return;
-        project.addRelationship(new RelationshipLink(item.getId(), other.getId(),
-                relationshipType.getText(), "", ""));
+        RelationshipLink link = new RelationshipLink(item.getId(), other.getId(),
+                relationshipName.getText(), "", "");
+        link.setArrowDirection((RelationshipLink.ArrowDirection) direction.getSelectedItem());
+        project.addRelationship(link);
         refreshLists();
     }
 
@@ -955,6 +1207,7 @@ public final class ResearchEditorPanel extends JPanel {
         while (values.containsKey(name)) name = "New field " + suffix++;
         values.put(name, "");
         item.setFields(values);
+        fieldExpansionStates.put(fieldStateKey(item, name), true);
         project.markDirty();
         refreshFields();
     }

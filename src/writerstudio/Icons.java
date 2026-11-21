@@ -61,6 +61,26 @@ final class Icons {
         };
     }
 
+    static Icon edit() {
+        return new Icon16(16, 16) {
+            @Override void draw(Graphics2D g) {
+                g.setColor(new Color(0x3B6EA8));
+                java.awt.Polygon pencil = new java.awt.Polygon(
+                        new int[] {3, 11, 14, 6}, new int[] {12, 4, 7, 15}, 4);
+                g.fillPolygon(pencil);
+                g.setColor(new Color(0x24466F));
+                g.drawPolygon(pencil);
+                g.setColor(new Color(0xD8C39A));
+                g.fillPolygon(new java.awt.Polygon(
+                        new int[] {3, 6, 2}, new int[] {12, 15, 15}, 3));
+                g.setColor(new Color(0x6E6258));
+                g.drawLine(2, 15, 3, 12);
+                g.setColor(new Color(0x8A6A3D));
+                g.drawLine(10, 5, 13, 8);
+            }
+        };
+    }
+
     static Icon primary() {
         return new Icon16(16, 16) {
             @Override void draw(Graphics2D g) {

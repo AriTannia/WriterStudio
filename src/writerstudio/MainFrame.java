@@ -88,7 +88,7 @@ public class MainFrame extends JFrame {
 
         editor = new EditorPanel(project, this::updateStatus);
         editor.setAi(aiService, this::createAiNote);
-        researchEditor = new ResearchEditorPanel(project, this::openInEditor);
+        researchEditor = new ResearchEditorPanel(project, this::openInEditor, this::updateModeAvailability);
         cork = new CorkboardPanel(project, this::openInEditor, this::newCard);
         outliner = new OutlinerPanel(project, this::openInEditor);
         inspector = new InspectorPanel(project);
@@ -338,14 +338,14 @@ public class MainFrame extends JFrame {
 
     private void setMode(Mode m) {
         if (!isModeAvailable(m)) return;
-        editor.flush();
+        saveProject(false);
         mode = m;
         modeButtons.get(m).setSelected(true);
         refreshActiveView();
     }
 
     private void onSelection(List<Item> sel) {
-        editor.flush();
+        saveProject(false);
         selection = sel;
         inspector.setItem(sel.size() == 1 ? sel.get(0) : null);
         refreshActiveView();
@@ -353,7 +353,7 @@ public class MainFrame extends JFrame {
 
     /** Opens an item (from a card or outline row) in the normal editor. */
     private void openInEditor(Item it) {
-        editor.flush();
+        saveProject(false);
         mode = Mode.EDITOR;
         modeButtons.get(Mode.EDITOR).setSelected(true);
         binder.select(it);
@@ -413,12 +413,19 @@ public class MainFrame extends JFrame {
     }
 
     private void updateModeAvailability() {
+        boolean hideCombinedDraft = isRelationshipFolderSelection();
         for (Mode m : Mode.values()) {
             boolean available = isModeAvailable(m);
             JToggleButton button = modeButtons.get(m);
-            if (button != null) button.setEnabled(available);
+            if (button != null) {
+                button.setVisible(m != Mode.SCRIVENINGS || !hideCombinedDraft);
+                button.setEnabled(available);
+            }
             JMenuItem menuItem = modeMenuItems.get(m);
-            if (menuItem != null) menuItem.setEnabled(available);
+            if (menuItem != null) {
+                menuItem.setVisible(m != Mode.SCRIVENINGS || !hideCombinedDraft);
+                menuItem.setEnabled(available);
+            }
         }
         if (selection.isEmpty()) return;
         if (isModeAvailable(mode)) return;
@@ -436,16 +443,22 @@ public class MainFrame extends JFrame {
             case EDITOR:
                 return selection.size() == 1 && !selection.get(0).isFolder();
             case SCRIVENINGS:
-                return !isResearchDocumentSelection() || isThreeActStructureSelection();
+                return !isRelationshipFolderSelection()
+                        && (!isResearchDocumentSelection() || isThreeActStructureSelection());
             case CORKBOARD:
                 Item it = selection.size() == 1 ? selection.get(0) : null;
                 return it != null && it.zone() != Item.Special.TRASH
-                        && it.getKind() != Item.Kind.FILE;
+                        && it.getKind() != Item.Kind.FILE
+                        && !isThreeActStructureSelection();
             case OUTLINER:
                 return true;
             default:
                 return false;
         }
+    }
+
+    private boolean isRelationshipFolderSelection() {
+        return selection.size() == 1 && selection.get(0).isRelationshipFolder();
     }
 
     private boolean isResearchDocumentSelection() {
@@ -535,18 +548,22 @@ public class MainFrame extends JFrame {
     }
 
     private void saveProject(boolean announce, Runnable afterSuccess) {
+        boolean researchEditorSave = mode == Mode.EDITOR && isResearchDocumentSelection();
+        researchEditor.flush();
         editor.flush();
         if (!project.isDirty() && !announce) {
             if (afterSuccess != null) afterSuccess.run();
             return;
         }
+        if (researchEditorSave) researchEditor.showSaveNotice("Saving\u2026");
         runInBackground("Saving project\u2026", "Save failed", project::save, () -> {
+            if (researchEditorSave) researchEditor.showSaveNotice("\u2713 Saved");
             if (announce) {
-                editor.showSaveNotice("\u2713 Saved");
+                if (!researchEditorSave) editor.showSaveNotice("\u2713 Saved");
                 status.setText("Saved");
             }
             if (afterSuccess != null) afterSuccess.run();
-        });
+        }, !researchEditorSave);
     }
 
     private void compile() {
@@ -593,12 +610,22 @@ public class MainFrame extends JFrame {
 
     private void runInBackground(String message, String errorTitle,
                                  BackgroundOperation operation, Runnable afterSuccess) {
+        runInBackground(message, errorTitle, operation, afterSuccess, true);
+    }
+
+    private void runInBackground(String message, String errorTitle,
+                                 BackgroundOperation operation, Runnable afterSuccess,
+                                 boolean showGlassPane) {
         if (backgroundTaskRunning) return;
         backgroundTaskRunning = true;
         busyMessage.setText(message);
         setUiBusy(true);
-        busyGlass.setVisible(true);
-        busyGlass.requestFocusInWindow();
+        if (showGlassPane) {
+            busyGlass.setVisible(true);
+            busyGlass.requestFocusInWindow();
+        } else {
+            researchEditor.keepSaveNoticeEnabled();
+        }
         new SwingWorker<Void, Void>() {
             @Override protected Void doInBackground() throws Exception {
                 operation.run();
@@ -607,7 +634,7 @@ public class MainFrame extends JFrame {
 
             @Override protected void done() {
                 backgroundTaskRunning = false;
-                busyGlass.setVisible(false);
+                if (showGlassPane) busyGlass.setVisible(false);
                 setUiBusy(false);
                 try {
                     get();
@@ -618,6 +645,9 @@ public class MainFrame extends JFrame {
                             "The operation was interrupted.", errorTitle, JOptionPane.ERROR_MESSAGE);
                 } catch (ExecutionException ex) {
                     Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+                    if (!showGlassPane && "Save failed".equals(errorTitle)) {
+                        researchEditor.showSaveNotice("Save failed");
+                    }
                     JOptionPane.showMessageDialog(MainFrame.this,
                             cause.getMessage() == null ? cause.toString() : cause.getMessage(),
                             errorTitle, JOptionPane.ERROR_MESSAGE);

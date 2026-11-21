@@ -3,6 +3,7 @@ package writerstudio;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
+import javax.imageio.ImageIO;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.rtf.RTFEditorKit;
 import javax.swing.tree.DefaultTreeModel;
@@ -17,6 +18,8 @@ import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import java.awt.Color;
+import java.awt.Point;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -62,6 +65,7 @@ public final class Project {
     private final DefaultTreeModel model;
     private final Map<String, Item> itemsById = new HashMap<>();
     private final List<RelationshipLink> relationships = new ArrayList<>();
+    private final Map<String, Point> relationshipNodePositions = new HashMap<>();
     private boolean dirty;
 
     /** While true the UI ignores tree-model events (used for edits made inside a view). */
@@ -126,14 +130,29 @@ public final class Project {
     public Item trash() { return trash; }
     public DefaultTreeModel model() { return model; }
     public List<RelationshipLink> relationships() { return new ArrayList<>(relationships); }
+    public Point relationshipNodePosition(String itemId) {
+        Point point = relationshipNodePositions.get(itemId);
+        return point == null ? null : new Point(point);
+    }
+    public void setRelationshipNodePosition(String itemId, Point point) {
+        if (itemId == null || point == null) return;
+        relationshipNodePositions.put(itemId, new Point(point));
+        markDirty();
+    }
     public Item findItem(String id) {
         if (id == null || id.isEmpty()) return null;
         return itemsById.get(id);
     }
     public void addRelationship(RelationshipLink link) {
         relationships.removeIf(existing -> existing.getFromId().equals(link.getFromId())
-                && existing.getToId().equals(link.getToId()));
+                && existing.getToId().equals(link.getToId())
+                && existing.getType().equals(link.getType()));
         relationships.add(link);
+        markDirty();
+    }
+    public void removeRelationship(RelationshipLink link) {
+        if (link == null) return;
+        relationships.removeIf(existing -> existing.getId().equals(link.getId()));
         markDirty();
     }
     public void removeRelationship(String fromId, String toId) {
@@ -186,6 +205,16 @@ public final class Project {
         String stored = UUID.randomUUID() + "-" + src.getName().replaceAll("[^A-Za-z0-9._-]", "_");
         File destination = new File(filesDir(), "research-images" + File.separator + stored);
         Files.copy(src.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        return "files/research-images/" + stored;
+    }
+
+    public String importResearchImage(BufferedImage image) throws IOException {
+        Files.createDirectories(new File(filesDir(), "research-images").toPath());
+        String stored = UUID.randomUUID() + "-crop.png";
+        File destination = new File(filesDir(), "research-images" + File.separator + stored);
+        if (!ImageIO.write(image, "png", destination)) {
+            throw new IOException("Could not save the cropped image.");
+        }
         return "files/research-images/" + stored;
     }
 
@@ -280,9 +309,63 @@ public final class Project {
         for (int i = 0; i < links.getLength(); i++) {
             if (!(links.item(i) instanceof Element)) continue;
             Element link = (Element) links.item(i);
-            project.relationships.add(new RelationshipLink(
+            String notes = "";
+            List<Point> routePoints = new ArrayList<>();
+            Point sourceAnchor = null;
+            Point targetAnchor = null;
+            NodeList children = link.getChildNodes();
+            for (int j = 0; j < children.getLength(); j++) {
+                if (!(children.item(j) instanceof Element)) continue;
+                Element child = (Element) children.item(j);
+                if ("notes".equals(child.getTagName())) notes = child.getTextContent();
+                else if ("point".equals(child.getTagName())) {
+                    try {
+                        routePoints.add(new Point(Integer.parseInt(child.getAttribute("x")),
+                                Integer.parseInt(child.getAttribute("y"))));
+                    } catch (NumberFormatException ignored) { }
+                } else if ("sourceAnchor".equals(child.getTagName())
+                        || "targetAnchor".equals(child.getTagName())) {
+                    try {
+                        Point anchor = new Point(Integer.parseInt(child.getAttribute("x")),
+                                Integer.parseInt(child.getAttribute("y")));
+                        if ("sourceAnchor".equals(child.getTagName())) sourceAnchor = anchor;
+                        else targetAnchor = anchor;
+                    } catch (NumberFormatException ignored) { }
+                }
+            }
+            if (children.getLength() == 0 || notes.isEmpty()) {
+                String legacyNotes = "";
+                for (int j = 0; j < children.getLength(); j++) {
+                    if (!(children.item(j) instanceof Element)) legacyNotes += children.item(j).getTextContent();
+                }
+                if (!legacyNotes.trim().isEmpty()) notes = legacyNotes.trim();
+            }
+            RelationshipLink relationship = new RelationshipLink(link.getAttribute("id"),
                     link.getAttribute("from"), link.getAttribute("to"),
-                    link.getAttribute("type"), link.getAttribute("status"), link.getTextContent()));
+                    link.getAttribute("type"), link.getAttribute("status"), notes);
+            try {
+                if (!link.getAttribute("direction").isEmpty()) {
+                    relationship.setArrowDirection(RelationshipLink.ArrowDirection.valueOf(
+                            link.getAttribute("direction")));
+                }
+            } catch (IllegalArgumentException ignored) { }
+            relationship.setRoutePoints(routePoints);
+            relationship.setFromAnchor(sourceAnchor);
+            relationship.setToAnchor(targetAnchor);
+            project.relationships.add(relationship);
+        }
+        NodeList layouts = pe.getElementsByTagName("graphLayout");
+        if (layouts.getLength() > 0) {
+            NodeList positions = ((Element) layouts.item(0)).getElementsByTagName("node");
+            for (int i = 0; i < positions.getLength(); i++) {
+                if (!(positions.item(i) instanceof Element)) continue;
+                Element position = (Element) positions.item(i);
+                try {
+                    project.relationshipNodePositions.put(position.getAttribute("item"),
+                            new Point(Integer.parseInt(position.getAttribute("x")),
+                                    Integer.parseInt(position.getAttribute("y"))));
+                } catch (NumberFormatException ignored) { }
+            }
         }
         return project;
     }
@@ -327,9 +410,21 @@ public final class Project {
                 images.add(new ResearchImage(c.getAttribute("file"), c.getAttribute("caption")));
                 it.setImages(images);
             } else if ("field".equals(c.getTagName())) {
-                Map<String, String> fields = it.getFields();
+                String name = c.getAttribute("name");
+                if (it.getResearchType() == Item.ResearchType.THREE_ACT_STRUCTURE
+                        && isThreeActField(name)) {
+                    Map<String, String> fields = it.getThreeActFields();
+                    fields.put(name, c.getTextContent());
+                    it.setThreeActFields(fields);
+                } else {
+                    Map<String, String> fields = it.getFields();
+                    fields.put(name, c.getTextContent());
+                    it.setFields(fields);
+                }
+            } else if ("threeActField".equals(c.getTagName())) {
+                Map<String, String> fields = it.getThreeActFields();
                 fields.put(c.getAttribute("name"), c.getTextContent());
-                it.setFields(fields);
+                it.setThreeActFields(fields);
             }
         }
         List<String> roles = new ArrayList<>();
@@ -397,12 +492,45 @@ public final class Project {
             pe.appendChild(re);
             for (RelationshipLink link : relationships) {
                 Element e = doc.createElement("relationship");
+                e.setAttribute("id", link.getId());
                 e.setAttribute("from", link.getFromId());
                 e.setAttribute("to", link.getToId());
                 e.setAttribute("type", Util.xmlSafe(link.getType()));
                 e.setAttribute("status", Util.xmlSafe(link.getStatus()));
-                e.setTextContent(link.getNotes());
+                e.setAttribute("direction", link.getArrowDirection().name());
+                Element notes = doc.createElement("notes");
+                notes.setTextContent(link.getNotes());
+                e.appendChild(notes);
+                for (Point point : link.getRoutePoints()) {
+                    Element routePoint = doc.createElement("point");
+                    routePoint.setAttribute("x", Integer.toString(point.x));
+                    routePoint.setAttribute("y", Integer.toString(point.y));
+                    e.appendChild(routePoint);
+                }
+                Point sourceAnchor = link.getFromAnchor();
+                if (sourceAnchor != null) {
+                    Element anchor = doc.createElement("sourceAnchor");
+                    anchor.setAttribute("x", Integer.toString(sourceAnchor.x));
+                    anchor.setAttribute("y", Integer.toString(sourceAnchor.y));
+                    e.appendChild(anchor);
+                }
+                Point targetAnchor = link.getToAnchor();
+                if (targetAnchor != null) {
+                    Element anchor = doc.createElement("targetAnchor");
+                    anchor.setAttribute("x", Integer.toString(targetAnchor.x));
+                    anchor.setAttribute("y", Integer.toString(targetAnchor.y));
+                    e.appendChild(anchor);
+                }
                 re.appendChild(e);
+            }
+            Element graphLayout = doc.createElement("graphLayout");
+            pe.appendChild(graphLayout);
+            for (Map.Entry<String, Point> entry : relationshipNodePositions.entrySet()) {
+                Element node = doc.createElement("node");
+                node.setAttribute("item", entry.getKey());
+                node.setAttribute("x", Integer.toString(entry.getValue().x));
+                node.setAttribute("y", Integer.toString(entry.getValue().y));
+                graphLayout.appendChild(node);
             }
 
             File tmp = new File(dir, "project.xml.tmp");
@@ -487,8 +615,21 @@ public final class Project {
             fieldElement.setTextContent(field.getValue());
             e.appendChild(fieldElement);
         }
+        for (Map.Entry<String, String> field : it.getThreeActFields().entrySet()) {
+            Element fieldElement = doc.createElement("threeActField");
+            fieldElement.setAttribute("name", Util.xmlSafe(field.getKey()));
+            fieldElement.setTextContent(field.getValue());
+            e.appendChild(fieldElement);
+        }
         for (Item ch : it.items()) e.appendChild(toXml(doc, ch));
         return e;
+    }
+
+    private static boolean isThreeActField(String name) {
+        for (ResearchEditorPanel.ThreeActField field : ResearchEditorPanel.THREE_ACT_FIELDS) {
+            if (field.name.equals(name)) return true;
+        }
+        return false;
     }
 
     // ---- research import -------------------------------------------------------------
